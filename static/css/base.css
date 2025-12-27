@@ -1,0 +1,359 @@
+/* =========================================
+   THEME: SOFT PURPLE CTF (Cyber-Soft)
+   ========================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+:root {
+    /* --- Палитра (Dracula / Soft Cyber vibes) --- */
+    --bg-deep:       #0F0C15;  /* Глубокий фон страницы */
+    --bg-card:       #1B1625;  /* Фон карточек */
+    --bg-hover:      #262035;  /* Фон при наведении */
+    
+    --text-main:     #E2E8F0;  /* Основной белый */
+    --text-muted:    #94A3B8;  /* Серый текст */
+    
+    --accent-primary:#A78BFA;  /* Мягкий фиолетовый (Soft Purple) */
+    --accent-glow:   rgba(167, 139, 250, 0.3); /* Свечение */
+    --accent-dark:   #7C3AED;  /* Темно-фиолетовый для кнопок */
+    
+    --ctf-success:   #34D399;  /* Мягкий мятный (Solved) */
+    --ctf-danger:    #F87171;  /* Мягкий красный (Error) */
+    --ctf-warning:   #FBBF24;  /* Желтый */
+
+    --font-ui:       'Inter', sans-serif;
+    --font-code:     'JetBrains Mono', monospace;
+}
+
+/* =========================================
+   GLOBAL RESET
+   ========================================= */
+
+body {
+    background-color: var(--bg-deep);
+    color: var(--text-main);
+    font-family: var(--font-ui);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    line-height: 1.6;
+}
+
+main {
+    flex: 1; /* Прижимает футер к низу */
+    padding-top: 20px;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s ease;
+}
+
+h1, h2, h3, h4, h5 {
+    color: #fff;
+    font-weight: 700;
+    margin-bottom: 1rem;
+}
+
+/* Скроллбар (чтобы не был белым) */
+::-webkit-scrollbar {
+    width: 10px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-deep);
+}
+::-webkit-scrollbar-thumb {
+    background: #332E40;
+    border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+}
+
+/* =========================================
+   NAVBAR (Верхнее меню)
+   ========================================= */
+
+.ctf-navbar {
+    background-color: rgba(15, 12, 21, 0.85) !important; /* Полупрозрачный */
+    backdrop-filter: blur(10px); /* Эффект размытия фона */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 15px 0;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.navbar-brand {
+    font-family: var(--font-code);
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: var(--accent-primary) !important;
+    text-shadow: 0 0 15px var(--accent-glow);
+}
+
+.nav-link {
+    color: var(--text-muted) !important;
+    font-weight: 500;
+    margin: 0 10px;
+    font-size: 0.95rem;
+}
+
+.nav-link:hover, .nav-link.active {
+    color: #fff !important;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+/* Кнопка гамбургер */
+.navbar-toggler {
+    border: 1px solid var(--text-muted);
+}
+.navbar-toggler-icon {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(167, 139, 250, 1)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+
+/* =========================================
+   COMPONENTS (Buttons, Cards, Forms)
+   ========================================= */
+
+/* Кнопки */
+.btn-ctf {
+    background: linear-gradient(135deg, var(--accent-dark), var(--accent-primary));
+    color: #fff !important;
+    border: none;
+    padding: 10px 25px;
+    border-radius: 8px; /* Немного скругленные */
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    box-shadow: 0 4px 15px var(--accent-glow);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.btn-ctf:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(167, 139, 250, 0.5);
+    color: #fff;
+}
+
+.btn-ctf-outline {
+    background: transparent;
+    border: 1px solid var(--text-muted);
+    color: var(--text-muted);
+    padding: 8px 20px;
+    border-radius: 8px;
+}
+
+.btn-ctf-outline:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: rgba(167, 139, 250, 0.05);
+}
+
+/* Карточки заданий */
+.ctf-card {
+    background-color: var(--bg-card);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.ctf-card:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--accent-primary);
+    transform: translateY(-5px);
+}
+
+/* Инпуты (Поля ввода) */
+.ctf-input {
+    background-color: #0d0a12;
+    border: 1px solid #332E40;
+    color: var(--text-main);
+    padding: 12px;
+    border-radius: 8px;
+    width: 100%;
+    font-family: var(--font-code);
+}
+
+.ctf-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.2);
+}
+
+/* =========================================
+   CTF SPECIFIC (Code, Flags)
+   ========================================= */
+
+.font-mono {
+    font-family: var(--font-code);
+}
+
+.text-accent {
+    color: var(--accent-primary);
+}
+
+/* Тег категории (Web, Pwn) */
+.badge-ctf {
+    background: rgba(167, 139, 250, 0.1);
+    color: var(--accent-primary);
+    border: 1px solid rgba(167, 139, 250, 0.2);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Блок терминала */
+.terminal-box {
+    background-color: #000;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 15px;
+    font-family: var(--font-code);
+    color: #ccc;
+    font-size: 0.9rem;
+}
+
+.cmd-prompt { color: var(--ctf-success); margin-right: 8px; }
+
+/* Решенное задание */
+.ctf-card.solved {
+    border-color: var(--ctf-success);
+    background: radial-gradient(circle at top right, rgba(52, 211, 153, 0.1), transparent);
+}
+.ctf-card.solved h4 {
+    color: var(--ctf-success);
+}
+
+/* Уменьшенная кнопка для "Выйти" */
+.btn-sm {
+    padding: 6px 15px;
+    font-size: 0.85rem;
+}
+
+/* =========================================
+   FOOTER (Только копирайт)
+   ========================================= */
+
+.ctf-footer {
+    padding: 20px 0;
+    text-align: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    margin-top: auto;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-family: var(--font-code);
+}
+
+
+/* --- Hero Block Styles --- */
+
+/* Свечение вокруг картинки */
+.hero-img {
+    max-width: 350px; /* Чуть уменьшил, чтобы было аккуратнее */
+    width: 100%;
+    filter: drop-shadow(0 0 20px rgba(167, 139, 250, 0.2)); /* Фиолетовая тень */
+    transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+.hero-img:hover {
+    transform: scale(1.02);
+    filter: drop-shadow(0 0 30px rgba(167, 139, 250, 0.4));
+}
+
+/* Ссылка на канал */
+.hero-link {
+    color: #fff;
+    border-bottom: 1px dashed var(--accent-primary);
+    padding-bottom: 2px;
+    transition: all 0.2s;
+}
+
+.hero-link:hover {
+    color: var(--accent-primary);
+    border-bottom-style: solid;
+    text-shadow: 0 0 10px var(--accent-glow);
+}
+
+/* Разделитель внутри карточки */
+.hero-divider {
+    border: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.3), transparent);
+    margin: 20px 0;
+}
+
+/* Дополнительное свечение для главной кнопки */
+.shadow-glow {
+    box-shadow: 0 0 20px rgba(124, 58, 237, 0.4); 
+}
+.shadow-glow:hover {
+    box-shadow: 0 0 30px rgba(124, 58, 237, 0.6);
+}
+
+
+/* --- Стили для форм (Login/Register) --- */
+
+/* Убираем стандартные стили Bootstrap для input-group */
+.input-group-text.ctf-input-icon {
+    background-color: #0d0a12; /* Темный фон, как у инпута */
+    border: 1px solid #332E40;
+    border-right: none; /* Убираем границу между иконкой и полем */
+    color: var(--text-muted);
+}
+
+/* Поле ввода внутри группы */
+.input-group .ctf-input {
+    border-left: none; /* Убираем левую границу, чтобы слилось с иконкой */
+}
+
+/* Фокус на поле подсвечивает и иконку тоже */
+.ctf-input:focus + .input-group-text,
+.input-group:focus-within .ctf-input-icon {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.input-group:focus-within .ctf-input {
+    border-color: var(--accent-primary);
+    box-shadow: none; /* Убираем стандартное свечение Bootstrap */
+}
+
+/* Красивые алерты (сообщения об ошибках) */
+.alert-ctf-danger {
+    background-color: rgba(248, 113, 113, 0.1); /* Прозрачный красный */
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    color: #FCA5A5; /* Светло-красный текст */
+    border-radius: 8px;
+    font-size: 0.9rem;
+    padding: 10px 15px;
+}
+
+
+:root {
+    /* Обновляем переменную для второстепенного текста на фиолетово-серый */
+    --text-muted: #B4A9CE; 
+}
+
+/* Применяем новый цвет ко всем параграфам, подписям и мелким текстам */
+p, .text-muted, .form-text, .small, label {
+    color: var(--text-muted) !important;
+}
+
+/* Стилизация плейсхолдера (текст подсказки внутри инпута) */
+.ctf-input::placeholder {
+    color: rgba(167, 139, 250, 0.4) !important; /* Полупрозрачный акцентный цвет */
+    font-weight: 400;
+}
+
+/* Для поддержки старых браузеров */
+.ctf-input::-webkit-input-placeholder {
+    color: rgba(167, 139, 250, 0.4) !important;
+}
+.ctf-input::-moz-placeholder {
+    color: rgba(167, 139, 250, 0.4) !important;
+}

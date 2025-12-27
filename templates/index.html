@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Добро пожаловать{% endblock %}
+
+{% block content %}
+    <div class="container">
+    <div class="row justify-content-center mt-5">
+        <div class="col-md-8 col-lg-6">
+            
+            <div class="ctf-card text-center p-5 hero-card">
+                <h1 class="mb-4 fw-bold">
+                    Добро пожаловать на <span class="text-accent">BobrCTF</span>
+                </h1>
+
+                <h3 class="mb-3 fw-bold">
+                    Площадка с <span class="font-mono text-accent">CTF</span> задачами для обучения и соревнований
+                </h3>
+
+                <hr class="hero-divider">
+
+                <div class="mt-4">
+                    <h5 class="mb-3 fw-bold">Для доступа к задачам необходимо авторизоваться</h5>
+                    <a href="/register" class="btn btn-ctf btn-lg px-5 shadow-glow">
+                        Зарегистрироваться
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,33 @@
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# environment
+.env
+.venv
+env/
+venv/
+
+# IDEs and editors
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# logs
+*.log
+logs/
+
+# flask
+instance/
+.pytest_cache/
+
+# database
+*.postgresql
+
+# migrations
+migrations/
+
+
