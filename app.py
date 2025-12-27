@@ -1,9 +1,12 @@
 from flask import Flask, render_template, session, url_for, redirect
+from models import db, User, Category, Challenge, Solve, MatchmakingQueue
 from config import Config
 
 app = Flask(__name__)
 app.secret_key = Config.SECRET_KEY
-
+app.config['SQLALCHEMY_DATABASE_URI'] = Config.SQLALCHEMY_DATABASE_URI
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
 
 class GuestUser:
     is_authenticated = False
