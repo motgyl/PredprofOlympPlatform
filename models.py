@@ -2,6 +2,8 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
 from enum import Enum
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import UserMixin
 
 db = SQLAlchemy()
 
@@ -16,20 +18,27 @@ class Difficulty(Enum):
 # Database Models
 # ===========================
 
-class User(db.Model):
+class User(db.Model, UserMixin):
     __tablename__ = "users"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     username = db.Column(db.String(50), unique=True, nullable=False)
     telegram = db.Column(db.String(100))
     password_hash = db.Column(db.Text, nullable=False)
-    elo_rating = db.Column(db.Integer, default=1200)
+    elo_rating = db.Column(db.Integer, default=1000)
+    user_points = db.Column(db.Integer, default=0)
     bio = db.Column(db.Text)
     avatar_url = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     challenges = db.relationship("Challenge", backref="author", lazy=True)
     solves = db.relationship("Solve", backref="user", lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 class Category(db.Model):
     __tablename__ = "categories"

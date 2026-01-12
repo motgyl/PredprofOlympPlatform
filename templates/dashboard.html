@@ -2,5 +2,111 @@
 {% block title %}Рейтинг{% endblock %}
 
 {% block content %}
+<div class="container py-4">
     
+    <!-- Заголовок -->
+    <div class="jumbotron text-center mb-5">
+        <h1 class="display-4 fw-bold" style="text-shadow: 0 0 20px rgba(167, 139, 250, 0.4);">
+            SCOREBOARD
+        </h1>
+        <p class="lead text-muted">Легенды киберпространства</p>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            
+            <!-- ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМОВ (Сортировка) -->
+            <div class="mb-4 text-center">
+                <div class="btn-group p-1 ctf-card" role="group" style="border-radius: 50px;">
+                    
+                    <!-- Кнопка ELO -->
+                    <a href="{{ url_for('dashboard', sort='elo') }}" 
+                       class="btn btn-sm px-4 {% if sort_mode == 'elo' %}btn-ctf{% else %}btn-transparent text-muted{% endif %}" 
+                       style="border-radius: 50px; transition: all 0.3s;">
+                       🏆 ELO Рейтинг
+                    </a>
+
+                    <!-- Кнопка Points -->
+                    <a href="{{ url_for('dashboard', sort='points') }}" 
+                       class="btn btn-sm px-4 {% if sort_mode == 'points' %}btn-ctf{% else %}btn-transparent text-muted{% endif %}" 
+                       style="border-radius: 50px; transition: all 0.3s;">
+                       💰 Очки (Points)
+                    </a>
+
+                </div>
+            </div>
+
+            <!-- Таблица -->
+            <div class="ctf-card p-0 overflow-hidden">
+                <table class="table table-borderless table-hover align-middle mb-0 ctf-scoreboard-table">
+                    <thead>
+                        <tr>
+                            <th class="text-center" style="width: 80px">#</th>
+                            <th class="ps-4">Пользователь</th>
+                            <!-- Заголовок меняется в зависимости от режима -->
+                            <th class="text-end pe-5">
+                                {% if sort_mode == 'points' %}
+                                    Набрано баллов
+                                {% else %}
+                                    ELO Рейтинг
+                                {% endif %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr class="{% if current_user.is_authenticated and user.id == current_user.id %}active-row{% endif %}">
+                            
+                            <!-- Место -->
+                            <td class="text-center font-mono fw-bold rank-cell">
+                                {% if loop.index == 1 %}🥇{% endif %}
+                                {% if loop.index == 2 %}🥈{% endif %}
+                                {% if loop.index == 3 %}🥉{% endif %}
+                                {% if loop.index > 3 %}{{ loop.index }}{% endif %}
+                            </td>
+
+                            <!-- Имя и аватар -->
+                            <td class="ps-4">
+                                <!-- Ссылка на профиль (если route 'profile' существует, иначе заглушка #) -->
+                                <a class="d-flex align-items-center text-decoration-none text-white">
+                                    <!-- Аватарка -->
+                                    <div class="avatar-mini me-3">
+                                        {{ user.username[0]|upper }}
+                                    </div>
+                                    
+                                    <span class="fw-bold username">{{ user.username }}</span>
+                                    
+                                    <!-- Бейдж TOP-3 -->
+                                    {% if loop.index <= 3 %}
+                                        <span class="badge bg-soft-purple ms-2">Top {{ loop.index }}</span>
+                                    {% endif %}
+                                </a>
+                            </td>
+
+                            <!-- Значение -->
+                            <td class="text-end pe-5 font-mono fw-bold fs-5">
+                                {% if sort_mode == 'points' %}
+                                    <!-- Баллы (зеленоватые) -->
+                                    <span class="text-success">{{ user.user_points }}</span>
+                                {% else %}
+                                    <!-- ELO (фиолетовый акцент) -->
+                                    <span class="text-accent">{{ user.elo_rating }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <!-- Если база пустая -->
+                        <tr>
+                            <td colspan="3" class="text-center py-5 text-muted">
+                                Рейтинг пуст. Станьте первым героем!
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+</div>
 {% endblock %}
