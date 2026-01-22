@@ -1,6 +1,74 @@
 {% extends "base.html" %}
-{% block title %}Соревнования{% endblock %}
+{% block title %}PvP Arena{% endblock %}
 
 {% block content %}
+<div class="container py-5 text-center">
     
+    <div class="jumbotron mb-5">
+        <h1 class="display-3 fw-bold text-accent" style="text-shadow: 0 0 30px rgba(167, 139, 250, 0.6);">
+            1 vs 1 ARENA
+        </h1>
+        <p class="lead text-muted">Сразись с другими хакерами в реальном времени.</p>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="ctf-card p-5 shadow-lg position-relative overflow-hidden">
+                
+                <!-- Анимация радара (фон) -->
+                <div class="radar-scan"></div>
+
+                <h3 class="text-white mb-4 position-relative z-index-2">Статус: 
+                    <span class="{{ 'text-warning' if in_queue else 'text-muted' }}">
+                        {{ 'В поиске соперника...' if in_queue else 'Ожидание' }}
+                    </span>
+                </h3>
+
+                {% if in_queue %}
+                    <div class="spinner-border text-accent mb-4" role="status" style="width: 3rem; height: 3rem;"></div>
+                    <p class="text-white-50 mb-4">Подбираем достойного оппонента...</p>
+                    
+                    <form action="{{ url_for('pvp_leave') }}" method="POST">
+                        <button class="btn btn-ctf-outline w-100">Отменить поиск</button>
+                    </form>
+
+                    <!-- Скрипт опроса статуса -->
+                    <script>
+                        setInterval(function() {
+                            fetch('/pvp/status')
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.status === 'match_found') {
+                                        window.location.href = data.url;
+                                    }
+                                });
+                        }, 2000); // Проверять каждые 2 секунды
+                    </script>
+
+                {% else %}
+                    <div class="mb-4">
+                        <span class="d-block text-white fs-1">⚔️</span>
+                    </div>
+                    <form action="{{ url_for('pvp_join') }}" method="POST">
+                        <button class="btn btn-ctf w-100 py-3 fs-5">НАЙТИ ИГРУ</button>
+                    </form>
+                {% endif %}
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Простая анимация радара */
+.radar-scan {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 600px; height: 600px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(167, 139, 250, 0.1) 0%, transparent 70%);
+    opacity: 0.5;
+    pointer-events: none;
+}
+</style>
 {% endblock %}

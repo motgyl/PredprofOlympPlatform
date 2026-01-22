@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}PvP Match{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    
+    <!-- Шапка матча -->
+    <div class="row mb-4 align-items-center">
+        <div class="col-5 text-center">
+            <div class="ctf-card p-2 border-success">
+                <h4 class="text-white mb-0">{{ current_user.username }}</h4>
+                <span class="text-muted font-mono">{{ current_user.elo_rating }} ELO</span>
+            </div>
+        </div>
+        <div class="col-2 text-center">
+            <h1 class="text-danger fw-bold">VS</h1>
+        </div>
+        <div class="col-5 text-center">
+            <div class="ctf-card p-2 border-danger">
+                <h4 class="text-white mb-0">{{ opponent.username }}</h4>
+                <span class="text-muted font-mono">{{ opponent.elo_rating }} ELO</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Описание задачи -->
+        <div class="col-lg-8">
+            <div class="ctf-card p-4 h-100">
+                <div class="d-flex justify-content-between mb-3">
+                    <span class="badge badge-ctf">{{ task.category.name }}</span>
+                    <span class="text-accent font-mono">{{ task.points }} pts</span>
+                </div>
+                <h3 class="text-white mb-3">{{ task.title }}</h3>
+                <div class="text-white-50 description-content">
+                    {{ task.description | safe }}
+                </div>
+                
+                {% if task.hint %}
+                <div class="mt-4 p-3 bg-dark rounded border border-secondary">
+                    <strong class="text-muted text-uppercase small">Подсказка:</strong>
+                    <p class="mb-0 text-white small">{{ task.hint }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Панель сдачи -->
+        <div class="col-lg-4">
+            <div class="ctf-card p-4 h-100 d-flex flex-column justify-content-center">
+                <h5 class="text-white text-center mb-4">Введи флаг первым!</h5>
+                
+                <form action="{{ url_for('pvp_submit') }}" method="POST">
+                    <input type="hidden" name="match_id" value="{{ match.id }}">
+                    
+                    <div class="mb-3">
+                        <input type="text" name="flag" class="form-control ctf-input text-center" placeholder="bobr{...}" autocomplete="off" autofocus>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-ctf w-100 py-2">
+                        ОТПРАВИТЬ
+                    </button>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <div class="spinner-grow text-danger spinner-grow-sm" role="status"></div>
+                    <span class="text-danger small ms-2 blink">Битва идет...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Автообновление страницы, если соперник выиграл
+    // (Простой вариант без вебсокетов: опрашиваем статус матча)
+    setInterval(function() {
+        fetch('/pvp/status') 
+            .then(r => r.json())
+            .then(data => {
+                // Если статус сменился на waiting (значит матч кончился и мы в меню) или что-то еще
+                // В данном простом примере, если матч кончится, нас перекинет на result при обновлении
+                // Просто перезагружаем страницу раз в 5 сек, чтобы увидеть результат
+                // window.location.reload(); 
+            });
+    }, 5000); 
+    // Лучше: сделать отдельный endpoint /api/match/<id>/status который возвращает winner_id
+</script>
+{% endblock %}

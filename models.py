@@ -34,6 +34,9 @@ class User(db.Model, UserMixin):
     challenges = db.relationship("Challenge", backref="author", lazy=True)
     solves = db.relationship("Solve", backref="user", lazy=True)
 
+    is_admin = db.Column(db.Boolean, default=False)
+    is_banned = db.Column(db.Boolean, default=False)
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
@@ -85,3 +88,23 @@ class MatchmakingQueue(db.Model):
     entered_at = db.Column(db.DateTime, default=datetime.utcnow)
     current_elo = db.Column(db.Integer, nullable=False)
 
+
+class Match(db.Model):
+    __tablename__ = "matches"
+
+    id = db.Column(db.Integer, primary_key=True)
+    player1_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    player2_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    challenge_id = db.Column(db.String(36), db.ForeignKey("challenges.id"), nullable=False)
+    
+    start_time = db.Column(db.DateTime, default=datetime.utcnow)
+    end_time = db.Column(db.DateTime)
+    winner_id = db.Column(db.String(36), db.ForeignKey("users.id"))
+    
+    is_active = db.Column(db.Boolean, default=True)
+
+    # Связи
+    player1 = db.relationship("User", foreign_keys=[player1_id])
+    player2 = db.relationship("User", foreign_keys=[player2_id])
+    winner = db.relationship("User", foreign_keys=[winner_id])
+    challenge = db.relationship("Challenge")

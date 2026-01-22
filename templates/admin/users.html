@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Управление пользователями{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="text-white fw-bold">👥 Пользователи</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-ctf-outline btn-sm">← Назад</a>
+    </div>
+
+    <div class="ctf-card p-0 overflow-hidden">
+        <table class="table table-dark table-hover mb-0 ctf-table align-middle">
+            <thead>
+                <tr>
+                    <th class="ps-4">ID</th>
+                    <th>User</th>
+                    <th>Status</th>
+                    <th class="text-end pe-4">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr style="{{ 'opacity: 0.5' if u.is_banned else '' }}">
+                    <td class="ps-4 font-mono text-muted">{{ u.id[:8] }}...</td>
+                    <td>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="fw-bold">{{ u.username }}</span>
+                            {% if u.is_admin %} <span class="badge bg-danger">ADMIN</span> {% endif %}
+                        </div>
+                    </td>
+                    <td>
+                        {% if u.is_banned %}
+                            <span class="text-danger fw-bold">BANNED</span>
+                        {% else %}
+                            <span class="text-success">Active</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end pe-4">
+                        {% if not u.is_admin %}
+                            {% if u.is_banned %}
+                                <a href="{{ url_for('admin_user_action', user_id=u.id, action='unban') }}" class="btn btn-sm btn-outline-success">Разбанить</a>
+                            {% else %}
+                                <a href="{{ url_for('admin_user_action', user_id=u.id, action='ban') }}" class="btn btn-sm btn-outline-warning">Бан</a>
+                            {% endif %}
+                            <a href="{{ url_for('admin_user_action', user_id=u.id, action='delete') }}" class="btn btn-sm btn-outline-danger ms-1" onclick="return confirm('Удалить навсегда?')">🗑</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
