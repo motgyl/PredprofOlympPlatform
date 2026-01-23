@@ -31,11 +31,13 @@ class User(db.Model, UserMixin):
     avatar_url = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    challenges = db.relationship("Challenge", backref="author", lazy=True)
-    solves = db.relationship("Solve", backref="user", lazy=True)
-
     is_admin = db.Column(db.Boolean, default=False)
     is_banned = db.Column(db.Boolean, default=False)
+
+    challenges = db.relationship("Challenge", backref="author", lazy=True)
+    solves = db.relationship("Solve", backref="user", lazy=True, cascade="all, delete-orphan")
+    
+    queue_entry = db.relationship("MatchmakingQueue", backref="user", uselist=False, cascade="all, delete-orphan")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -66,7 +68,8 @@ class Challenge(db.Model):
     author_id = db.Column(db.String(36), db.ForeignKey("users.id"))
     is_active = db.Column(db.Boolean, default=True)
 
-    solves = db.relationship("Solve", backref="challenge", lazy=True)
+    solves = db.relationship("Solve", backref="challenge", lazy=True, cascade="all, delete-orphan")
+    matches = db.relationship("Match", backref="challenge", lazy=True, cascade="all, delete-orphan")
 
 class Solve(db.Model):
     __tablename__ = "solves"
@@ -103,8 +106,11 @@ class Match(db.Model):
     
     is_active = db.Column(db.Boolean, default=True)
 
-    # Связи
-    player1 = db.relationship("User", foreign_keys=[player1_id])
-    player2 = db.relationship("User", foreign_keys=[player2_id])
-    winner = db.relationship("User", foreign_keys=[winner_id])
-    challenge = db.relationship("Challenge")
+    player1 = db.relationship("User", foreign_keys=[player1_id], 
+                              backref=db.backref("matches_as_player1", cascade="all, delete-orphan"))
+                              
+    player2 = db.relationship("User", foreign_keys=[player2_id], 
+                              backref=db.backref("matches_as_player2", cascade="all, delete-orphan"))
+                              
+    winner = db.relationship("User", foreign_keys=[winner_id], 
+                             backref=db.backref("matches_won", cascade="save-update, merge")) # Здесь удалять не обязательно, т.к. удалит player1/2
