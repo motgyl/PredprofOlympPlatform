@@ -8,6 +8,7 @@
             <h2 class="text-white fw-bold mb-3">🛠 Панель Администратора</h2>
             <div class="d-flex gap-3">
                 <a href="{{ url_for('admin_users') }}" class="btn btn-ctf-outline">Управление пользователями</a>
+                <a href="{{ url_for('admin_run_task') }}" class="btn btn-ctf-outline">Запуск тасков autotask</a>
             </div>
         </div>
     </div>
@@ -35,52 +36,28 @@
     </div>
 
     <div class="row justify-content-center">
-        <div class="col-lg-8">
+        <div class="col-lg-10">
             <div class="ctf-card p-4 shadow-glow">
+                <h4 class="text-white mb-4">📝 Создание новой задачи</h4>
                 
-                <!-- Навигация (Табы) -->
-                <ul class="nav nav-pills mb-4" id="adminTab" role="tablist">
+                <!-- Выбор способа создания -->
+                <ul class="nav nav-tabs mb-4 border-bottom border-secondary" role="tablist">
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link active btn-sm" id="gen-tab" data-bs-toggle="tab" data-bs-target="#gen" type="button">⚡ Авто-генератор</button>
+                        <button class="nav-link active text-accent" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual" type="button" role="tab">
+                            Ручное создание
+                        </button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link btn-sm ms-2" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual" type="button">✍ Ручное создание</button>
+                        <button class="nav-link text-accent" id="autogen-tab" data-bs-toggle="tab" data-bs-target="#autogen" type="button" role="tab">
+                            Автогенерация
+                        </button>
                     </li>
                 </ul>
 
+                <!-- Навигация (Табы) -->
                 <div class="tab-content" id="adminTabContent">
-                    
-                    <!-- 1. ГЕНЕРАТОР -->
-                    <div class="tab-pane fade show active" id="gen" role="tabpanel">
-                        <form action="{{ url_for('admin_generate') }}" method="POST">
-                            <div class="mb-3">
-                                <label class="form-label text-muted">Категория</label>
-                                <select name="category" class="form-control ctf-input">
-                                    <option value="Cryptography">Cryptography</option>
-                                    <option value="Linux">Linux</option>
-                                    <option value="Network">Network</option>
-                                    <option value="Forensics">Forensics</option>
-                                    <option value="Logic">Logic</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label text-muted">Сложность</label>
-                                <select name="difficulty" class="form-control ctf-input">
-                                    <option value="Easy">Easy</option>
-                                    <option value="Medium">Medium</option>
-                                    <option value="Hard">Hard</option>
-                                </select>
-                            </div>
-                            <div class="mb-4">
-                                <label class="form-label text-muted">Количество</label>
-                                <input type="number" name="count" class="form-control ctf-input" value="1" min="1" max="10">
-                            </div>
-                            <button type="submit" class="btn btn-ctf w-100">Сгенерировать</button>
-                        </form>
-                    </div>
-
-                    <!-- 2. РУЧНОЕ СОЗДАНИЕ -->
-                    <div class="tab-pane fade" id="manual" role="tabpanel">
+                    <!-- РУЧНОЕ СОЗДАНИЕ -->
+                    <div class="tab-pane fade show active" id="manual" role="tabpanel">
                         <form action="{{ url_for('admin_create_challenge') }}" method="POST">
                             <div class="mb-3">
                                 <label class="form-label text-muted">Название</label>
@@ -126,9 +103,206 @@
                         </form>
                     </div>
 
+                    <!-- АВТОГЕНЕРАЦИЯ -->
+                    <div class="tab-pane fade" id="autogen" role="tabpanel">
+                        <form id="autogenForm">
+                            <div class="mb-3">
+                                <label class="form-label text-muted">Название</label>
+                                <input type="text" id="ag_title" class="form-control ctf-input" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-muted">Описание (HTML поддерживается)</label>
+                                <textarea id="ag_description" class="form-control ctf-input" rows="3" required></textarea>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Категория</label>
+                                    <select id="ag_category_id" class="form-control ctf-input">
+                                        {% for cat in categories %}
+                                            <option value="{{ cat.id }}">{{ cat.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Сложность</label>
+                                    <select id="ag_difficulty" class="form-control ctf-input">
+                                        <option value="Easy">Easy</option>
+                                        <option value="Medium">Medium</option>
+                                        <option value="Hard">Hard</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="form-label text-muted">Способ генерации</label>
+                                <select id="ag_generator" class="form-control ctf-input" onchange="updateGeneratorParams()">
+                                    <option value="simple">Простая задача (случайный флаг)</option>
+                                    <option value="stegano">Стеганография (скрытие флага в изображение)</option>
+                                    <option value="custom">Собственный флаг (для всех участников)</option>
+                                </select>
+                            </div>
+
+                            <!-- Параметры для стеганографии -->
+                            <div id="stegano-params" style="display: none;" class="mb-4">
+                                <label class="form-label text-muted">Исходное изображение</label>
+                                <select id="ag_image_path" class="form-control ctf-input">
+                                    <option value="autotask/frame.png">frame.png (по умолчанию)</option>
+                                    <option value="autotask/deliciousdrink.png">deliciousdrink.png</option>
+                                </select>
+                                <small class="text-muted d-block mt-2">Флаг будет скрыт в метаданные изображения каждого участника</small>
+                            </div>
+
+                            <!-- Параметры для собственного флага -->
+                            <div id="custom-params" style="display: none;" class="mb-4">
+                                <label class="form-label text-muted">Флаг (один для всех участников)</label>
+                                <input type="text" id="ag_flag" class="form-control ctf-input" placeholder="bobr{secret_text}">
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label text-muted">Очки</label>
+                                    <input type="number" id="ag_points" class="form-control ctf-input" value="100">
+                                </div>
+                                <div class="col-md-8 mb-3">
+                                    <label class="form-label text-muted">Подсказка</label>
+                                    <input type="text" id="ag_hint" class="form-control ctf-input">
+                                </div>
+                            </div>
+
+                            <div id="loading-indicator" style="display: none;" class="alert alert-info mb-3">
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                                Создание задачи и генерация флагов...
+                            </div>
+
+                            <button type="button" onclick="submitAutogenForm()" class="btn btn-ctf w-100">
+                                Создать с автогенерацией
+                            </button>
+                        </form>
+                    </div>
+
                 </div>
             </div>
         </div>
     </div>
+    
+    <!-- Непубликованные задачи -->
+    <div class="row mt-4">
+        <div class="col-lg-10">
+            <div class="ctf-card p-3">
+                <h5 class="text-white fw-bold">Непубликованные задачи</h5>
+                {% if unpublished %}
+                    <ul class="list-group list-group-flush mt-3">
+                        {% for ch in unpublished %}
+                            <li class="list-group-item bg-transparent border-secondary d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong class="text-white">{{ ch.title }}</strong>
+                                    <div class="small text-white-50">{{ ch.category.name if ch.category else '—' }} • {{ ch.points }} pts</div>
+                                </div>
+                                <form action="{{ url_for('admin_publish_challenge', challenge_id=ch.id) }}" method="POST">
+                                    <button class="btn btn-sm btn-success">Опубликовать</button>
+                                </form>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <div class="text-muted small mt-2">Нет непубликованных задач.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 </div>
+
+<script>
+function updateGeneratorParams() {
+    const generator = document.getElementById('ag_generator').value;
+    document.getElementById('stegano-params').style.display = generator === 'stegano' ? 'block' : 'none';
+    document.getElementById('custom-params').style.display = generator === 'custom' ? 'block' : 'none';
+}
+
+async function submitAutogenForm() {
+    const title = document.getElementById('ag_title').value;
+    const description = document.getElementById('ag_description').value;
+    const category_id = document.getElementById('ag_category_id').value;
+    const difficulty = document.getElementById('ag_difficulty').value;
+    const points = document.getElementById('ag_points').value;
+    const hint = document.getElementById('ag_hint').value;
+    const generator_type = document.getElementById('ag_generator').value;
+
+    if (!title || !description) {
+        alert('Название и описание обязательны');
+        return;
+    }
+
+    const data = {
+        title,
+        description,
+        category_id,
+        difficulty,
+        points,
+        hint,
+        generator_type
+    };
+
+    if (generator_type === 'stegano') {
+        data.generator_params = {
+            image_path: document.getElementById('ag_image_path').value
+        };
+    } else if (generator_type === 'custom') {
+        const flag = document.getElementById('ag_flag').value;
+        if (!flag) {
+            alert('Флаг обязателен');
+            return;
+        }
+        data.flag = flag;
+    }
+
+    document.getElementById('loading-indicator').style.display = 'block';
+
+    try {
+        const response = await fetch('{{ url_for("admin_api_create_task") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert(result.message || 'Задача успешно создана!');
+            document.getElementById('autogenForm').reset();
+            document.getElementById('ag_generator').value = 'simple';
+            updateGeneratorParams();
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            alert('Ошибка: ' + (result.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка при создании задачи: ' + error.message);
+    } finally {
+        document.getElementById('loading-indicator').style.display = 'none';
+    }
+}
+</script>
+
+<style>
+.nav-tabs .nav-link {
+    color: #999 !important;
+    border: none;
+    border-bottom: 2px solid transparent;
+    transition: all 0.3s;
+}
+
+.nav-tabs .nav-link.active {
+    color: #00ff88 !important;
+    border-bottom: 2px solid #00ff88;
+    background: transparent;
+}
+
+.nav-tabs .nav-link:hover {
+    color: #00ff88 !important;
+}
+</style>
 {% endblock %}

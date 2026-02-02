@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Результат выполнения таска{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="text-white fw-bold mb-3">✅ Таск выполнен успешно</h2>
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="ctf-card p-4 shadow-glow">
+                <h4 class="text-success mb-4">{{ task_data['title'] }}</h4>
+
+                {% if users_count %}
+                <div class="alert alert-success mb-4" role="alert">
+                    <strong>✓ Успешно!</strong> Задача создана и доступна для <strong>{{ users_count }}</strong> пользователей.
+                </div>
+
+                <div class="mb-4">
+                    <h5 class="text-white small">Сохранено в систему:</h5>
+                    <div class="bg-dark p-3 rounded mt-2" style="border-left: 3px solid #00ff88;">
+                        <div class="mb-2">
+                            <strong class="text-accent">ID задачи:</strong>
+                            <span class="text-white-50 ms-2 font-monospace" style="font-size: 0.85rem;">{{ challenge_id }}</span>
+                        </div>
+                        <div>
+                            <strong class="text-accent">Статус:</strong>
+                            <span class="badge bg-success ms-2">Активна для всех</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="mb-4">
+                    <h5 class="text-white small">Параметры генератора:</h5>
+                    <div class="bg-dark p-3 rounded mt-2" style="border-left: 3px solid #00ff88;">
+                        <div class="mb-2">
+                            <strong class="text-accent">Тип генератора:</strong>
+                            <span class="text-white ms-2">{{ generator_type }}</span>
+                        </div>
+                        <div class="mb-2">
+                            <strong class="text-accent">Название:</strong>
+                            <span class="text-white ms-2">{{ task_data['title'] }}</span>
+                        </div>
+                        <div class="mb-2">
+                            <strong class="text-accent">Флаг (для примера):</strong>
+                            <span class="text-white ms-2 font-monospace">{{ task_data['flag'] }}</span>
+                        </div>
+                        {% if task_data['image_path'] %}
+                        <div class="mb-2">
+                            <strong class="text-accent">Изображение:</strong>
+                            <span class="text-white ms-2">{{ task_data['image_path'] }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <h5 class="text-white small">Информация о задаче:</h5>
+                    <div class="bg-dark p-3 rounded mt-2">
+                        <div class="mb-2">
+                            <strong class="text-accent">Описание:</strong>
+                            <div class="text-white-50 mt-1">{{ task_info['description'] }}</div>
+                        </div>
+                        {% if task_info['hint'] %}
+                        <div class="mb-2">
+                            <strong class="text-accent">Подсказка:</strong>
+                            <div class="text-white-50 mt-1">{{ task_info['hint'] }}</div>
+                        </div>
+                        {% endif %}
+                        <div>
+                            <strong class="text-accent">Динамическое описание:</strong>
+                            <span class="text-white-50 ms-2">
+                                {% if task_info['dynamic_description'] %}Да{% else %}Нет{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('admin_run_task') }}" class="btn btn-ctf-outline">
+                        ⚙️ Запустить другой таск
+                    </a>
+                    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-ctf-outline">
+                        🛠 Вернуться в админку
+                    </a>
+                </div>
+
+                <div class="mt-4 pt-3 border-top border-secondary">
+                    <p class="text-muted small mb-0">
+                        💡 Задача добавлена в систему. Каждому пользователю сгенерирован уникальный флаг.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

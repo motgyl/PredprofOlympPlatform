@@ -32,6 +32,11 @@
                     </li>
 
                     {% if current_user.is_authenticated %}
+                        {% if current_user.is_admin %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin">Админ</a>
+                        </li>
+                        {% endif %}
                         
                         <li class="nav-item ms-lg-3">
                             <a href="/profile" class="btn btn-ctf d-flex align-items-center gap-2">

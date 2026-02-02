@@ -8,11 +8,12 @@ import random
 from datetime import datetime
 
 # Импортируем модели и настройки
-from models import db, User, Category, Challenge, Solve, Difficulty
+from models import db, User, Category, Challenge, Solve, Difficulty, UserFlag, UserFile
 from config import Config
 from generators import TaskGenerator 
 from models import Match, MatchmakingQueue
 from utils import calculate_elo
+from autotask.examples import SimpleStegano
 
 
 app = Flask(__name__)
@@ -47,7 +48,14 @@ def init_app_data():
     # Проверяем, была ли инициализация, чтобы не нагружать каждый запрос
     if not hasattr(app, 'app_initialized'):
         with app.app_context():
-            # 1. Создаем таблицы, если их нет
+            # Проверка на пересоздание БД (удалить все и создать заново)
+            recreate_flag = os.getenv('RECREATE_DB', 'false').lower() in ('1', 'true', 'yes')
+            if recreate_flag:
+                try:
+                    db.drop_all()
+                except Exception:
+                    pass
+            # 1. Создаем таблицы
             db.create_all()
             
             # 2. Создаем базовые категории
@@ -73,6 +81,8 @@ def init_app_data():
                 # admin.set_password(admin_pass) # Можно раскомментировать, если хотите сбрасывать пароль при рестарте
             
             db.session.commit()
+
+            # (Old template-based auto-generation removed — use manual creation and autotask-based generation)
             app.app_initialized = True
 
 # ==========================================
@@ -123,6 +133,41 @@ def register():
             new_user = User(username=username)
             new_user.set_password(password)
             db.session.add(new_user)
+            db.session.flush()  # Получаем ID нового пользователя
+            
+            # Создаем флаги для всех активных задач (чтобы новые пользователи получили текущие задачи)
+            all_challenges = Challenge.query.filter_by(is_active=True).all()
+            base_image = os.path.join(app.root_path, 'autotask', 'frame.png')
+            for challenge in all_challenges:
+                # Пропускаем, если уже есть запись (безопасность на случай повторов)
+                if UserFlag.query.filter_by(user_id=new_user.id, challenge_id=challenge.id).first():
+                    continue
+
+                # Если категория Forensics — создаём стегано-изображение и файл
+                cat_name = (challenge.category.name.lower() if challenge.category else '')
+                flag_value = TaskGenerator.generate_flag()
+
+                if cat_name == 'forensics':
+                    user_dir = os.path.join(app.root_path, 'static', 'uploads', challenge.id, new_user.id)
+                    steg = SimpleStegano(image_path=base_image)
+                    steg.generate(flag=flag_value, save_path=user_dir)
+
+                    user_file = UserFile(
+                        user_id=new_user.id,
+                        challenge_id=challenge.id,
+                        file_path=os.path.join('static', 'uploads', challenge.id, new_user.id, 'stegano_image.png'),
+                        file_name='stegano_image.png'
+                    )
+                    db.session.add(user_file)
+
+                # Сохраняем флаг
+                user_flag = UserFlag(
+                    user_id=new_user.id,
+                    challenge_id=challenge.id,
+                    flag=flag_value
+                )
+                db.session.add(user_flag)
+            
             db.session.commit()
             
             login_user(new_user)
@@ -232,10 +277,16 @@ def challenges_list():
     
     # Чтобы подсветить решенные задачи, нам нужен список ID решенных задач текущим юзером
     solved_challenges_ids = [s.challenge_id for s in current_user.solves]
+    # Файлы, прикрепленные к текущему пользователю (по задаче)
+    user_files = UserFile.query.filter_by(user_id=current_user.id).all()
+    files_map = {}
+    for uf in user_files:
+        files_map.setdefault(uf.challenge_id, []).append(uf)
     
     return render_template('challenges.html', 
                            categories=categories, 
-                           solved_ids=solved_challenges_ids)
+                           solved_ids=solved_challenges_ids,
+                           user_files_map=files_map)
 
 @app.route('/challenges/submit', methods=['POST'])
 @login_required
@@ -251,8 +302,19 @@ def submit_flag():
         flash("Вы уже решили эту задачу!", "error")
         return redirect(url_for('challenges_list'))
 
-    # 2. Проверяем флаг
-    if flag_input == challenge.flag:
+    # 2. Получаем индивидуальный флаг пользователя для этой задачи
+    user_flag_record = UserFlag.query.filter_by(user_id=current_user.id, challenge_id=challenge.id).first()
+    
+    # Если флага еще нет, создаем его (на случай, если он не был сгенерирован ранее)
+    if not user_flag_record:
+        # Генерируем новый флаг
+        flag_value = TaskGenerator.generate_flag()
+        user_flag_record = UserFlag(user_id=current_user.id, challenge_id=challenge.id, flag=flag_value)
+        db.session.add(user_flag_record)
+        db.session.commit()
+    
+    # 3. Проверяем флаг
+    if flag_input == user_flag_record.flag:
         # Верно! Создаем запись о решении
         solve = Solve(user_id=current_user.id, challenge_id=challenge.id)
         db.session.add(solve)
@@ -284,46 +346,57 @@ def admin_dashboard():
     solves_count = Solve.query.count()
     # Передаем категории в шаблон
     categories = Category.query.all()
+    # Непубликованные задачи (для админа) - те, которые не активны
+    unpublished = Challenge.query.filter_by(is_active=False).order_by(Challenge.id.desc()).all()
     return render_template('admin/dashboard.html', 
                            users_count=users_count, 
                            challenges_count=challenges_count, 
                            solves_count=solves_count,
-                           categories=categories)
+                           categories=categories,
+                           unpublished=unpublished)
 
-# 1. АВТО ГЕНЕРАЦИЯ
-@app.route('/admin/generate', methods=['POST'])
+
+# old import_templates endpoint removed
+
+
+@app.route('/admin/publish/<challenge_id>', methods=['POST'])
 @admin_required
-def admin_generate():
-    count = int(request.form.get('count', 1))
-    category_name = request.form.get('category')
-    difficulty = request.form.get('difficulty')
-    
-    category = Category.query.filter_by(name=category_name).first()
-    if not category:
-        flash(f"Категория {category_name} не найдена (нужно создать в БД)", "error")
-        return redirect(url_for('admin_dashboard'))
+def admin_publish_challenge(challenge_id):
+    ch = Challenge.query.get_or_404(challenge_id)
+    ch.is_active = True
+    # Создаём флаги для всех пользователей (если ещё нет)
+    users = User.query.filter_by(is_admin=False).all()
+    base_image = os.path.join(app.root_path, 'autotask', 'frame.png')
+    created = 0
+    for user in users:
+        if UserFlag.query.filter_by(user_id=user.id, challenge_id=ch.id).first():
+            continue
+        flag_value = TaskGenerator.generate_flag()
+        # Если Forensics — генерируем stegano файл
+        cat_name = (ch.category.name.lower() if ch.category else '')
+        if cat_name == 'forensics':
+            user_dir = os.path.join(app.root_path, 'static', 'uploads', ch.id, user.id)
+            steg = SimpleStegano(image_path=base_image)
+            steg.generate(flag=flag_value, save_path=user_dir)
 
-    gen_count = 0
-    for _ in range(count):
-        # Используем новый генератор
-        task_data = TaskGenerator.generate_task(category_name, difficulty)
-        
-        new_chall = Challenge(
-            title=task_data['title'],
-            description=task_data['description'],
-            flag=task_data['flag'],
-            hint=task_data['hint'],
-            points=task_data['points'],
-            difficulty=Difficulty(difficulty),
-            category_id=category.id,
-            author_id=current_user.id
-        )
-        db.session.add(new_chall)
-        gen_count += 1
+            user_file = UserFile(
+                user_id=user.id,
+                challenge_id=ch.id,
+                file_path=os.path.join('static', 'uploads', ch.id, user.id, 'stegano_image.png'),
+                file_name='stegano_image.png'
+            )
+            db.session.add(user_file)
+
+        user_flag = UserFlag(user_id=user.id, challenge_id=ch.id, flag=flag_value)
+        db.session.add(user_flag)
+        created += 1
 
     db.session.commit()
-    flash(f"Сгенерировано {gen_count} задач ({category_name})", "success")
+    flash(f"Задача '{ch.title}' опубликована. Сгенерировано флагов: {created}", 'success')
     return redirect(url_for('admin_dashboard'))
+
+# 1. АВТО ГЕНЕРАЦИЯ
+# old admin auto-generation removed; manual creation and autotask-based generation remain
 
 # 2. РУЧНОЕ ДОБАВЛЕНИЕ (НОВОЕ)
 @app.route('/admin/create', methods=['POST'])
@@ -331,7 +404,7 @@ def admin_generate():
 def admin_create_challenge():
     title = request.form.get('title')
     description = request.form.get('description')
-    flag = request.form.get('flag')
+    flag = request.form.get('flag')  # Это может быть формат или просто текст флага
     points = int(request.form.get('points'))
     difficulty = request.form.get('difficulty')
     category_id = request.form.get('category_id')
@@ -340,7 +413,6 @@ def admin_create_challenge():
     new_chall = Challenge(
         title=title,
         description=description,
-        flag=flag,
         points=points,
         difficulty=Difficulty(difficulty),
         category_id=category_id,
@@ -348,6 +420,71 @@ def admin_create_challenge():
         author_id=current_user.id
     )
     db.session.add(new_chall)
+    db.session.flush()  # Получаем ID новой задачи
+    
+    # Создаем флаги для каждого пользователя
+    all_users = User.query.filter_by(is_admin=False).all()
+    
+    # Определим категорию по id (если нужно для специальных генераторов)
+    cat_obj = Category.query.get(category_id) if category_id else None
+
+    if flag:
+        # Если флаг содержит {}, то это шаблон для генерации
+        if '{' in flag and '}' in flag:
+            # Генерируем разные флаги на основе шаблона
+            for user in all_users:
+                # Генерируем уникальный флаг
+                user_flag_value = TaskGenerator.generate_flag()
+                user_flag = UserFlag(
+                    user_id=user.id,
+                    challenge_id=new_chall.id,
+                    flag=user_flag_value
+                )
+                db.session.add(user_flag)
+        else:
+            # Это обычный флаг - используем его для всех пользователей
+            # Особая обработка для Forensics: создаём стегано-файлы
+            if cat_obj and cat_obj.name.lower() == 'forensics':
+                base_image = os.path.join(app.root_path, 'autotask', 'frame.png')
+                public_dir = os.path.join('static', 'uploads', new_chall.id)
+                new_chall.public_files_path = public_dir
+                for user in all_users:
+                    user_dir = os.path.join(app.root_path, public_dir, user.id)
+                    steg = SimpleStegano(image_path=base_image)
+                    steg.generate(flag=flag, save_path=user_dir)
+
+                    user_flag = UserFlag(
+                        user_id=user.id,
+                        challenge_id=new_chall.id,
+                        flag=flag
+                    )
+                    db.session.add(user_flag)
+
+                    user_file = UserFile(
+                        user_id=user.id,
+                        challenge_id=new_chall.id,
+                        file_path=os.path.join(public_dir, user.id, 'stegano_image.png'),
+                        file_name='stegano_image.png'
+                    )
+                    db.session.add(user_file)
+            else:
+                for user in all_users:
+                    user_flag = UserFlag(
+                        user_id=user.id,
+                        challenge_id=new_chall.id,
+                        flag=flag
+                    )
+                    db.session.add(user_flag)
+    else:
+        # Флаг не указан - генерируем для каждого пользователя
+        for user in all_users:
+            user_flag = UserFlag(
+                user_id=user.id,
+                challenge_id=new_chall.id,
+                flag=TaskGenerator.generate_flag()
+            )
+            db.session.add(user_flag)
+    
     db.session.commit()
     flash("Задание успешно создано вручную!", "success")
     return redirect(url_for('admin_dashboard'))
@@ -358,6 +495,281 @@ def admin_users():
     # Получаем всех пользователей для списка
     users = User.query.order_by(User.id).all()
     return render_template('admin/users.html', users=users)
+
+@app.route('/admin/run-task', methods=['GET', 'POST'])
+@admin_required
+def admin_run_task():
+    """Страница для запуска тасков из autotask"""
+    import importlib.util
+    import sys
+    
+    available_tasks = []
+    autotask_path = os.path.join(app.root_path, 'autotask')
+    
+    # Получаем список доступных генераторов
+    try:
+        # Получаем доступные классы из examples.py
+        spec = importlib.util.spec_from_file_location("autotask.examples", 
+                                                       os.path.join(autotask_path, 'examples.py'))
+        examples_module = importlib.util.module_from_spec(spec)
+        sys.modules['autotask.examples'] = examples_module
+        spec.loader.exec_module(examples_module)
+        
+        # Находим все классы генераторов
+        generators = {
+            'Challenge': examples_module.Challenge,
+            'SimpleStegano': examples_module.SimpleStegano,
+        }
+    except Exception as e:
+        generators = {}
+        print(f"Error loading generators: {e}")
+    
+    if request.method == 'POST':
+        generator_type = request.form.get('generator_type')
+        task_data = {
+            'title': request.form.get('title'),
+            'description': request.form.get('description'),
+            'flag': request.form.get('flag')
+        }
+        
+        # Параметры в зависимости от типа
+        task_data['image_path'] = request.form.get('image_path', 'frame.png') if generator_type == 'SimpleStegano' else None
+        task_data['save_path'] = request.form.get('save_path', os.path.join(app.root_path, 'autotask/images/temp'))
+        
+        try:
+            if generator_type not in generators:
+                flash(f"Неизвестный генератор: {generator_type}", "error")
+                return redirect(url_for('admin_run_task'))
+            
+            GeneratorClass = generators[generator_type]
+            
+            # Создаем экземпляр генератора
+            if generator_type == 'SimpleStegano':
+                image_path = task_data['image_path']
+                if not image_path.startswith('/'):
+                    image_path = os.path.join(autotask_path, image_path)
+                
+                task = GeneratorClass(
+                    image_path=image_path,
+                    description=task_data['description']
+                )
+            else:
+                task = GeneratorClass(description=task_data['description'])
+            
+            # Запускаем генерацию
+            save_path = task_data['save_path']
+            os.makedirs(save_path, exist_ok=True)
+            
+            if generator_type == 'SimpleStegano':
+                task.generate(flag=task_data['flag'], save_path=save_path)
+            else:
+                task.generate(flag=task_data['flag'])
+            
+            # Получаем информацию о задаче
+            info = task.get_info()
+            
+            # СОХРАНЯЕМ ЗАДАЧУ В БД
+            new_challenge = Challenge(
+                title=task_data['title'],
+                description=info.get('description', task_data['description']),
+                hint=info.get('hint', ''),
+                points=100,
+                difficulty=Difficulty.EASY,
+                author_id=current_user.id
+            )
+            db.session.add(new_challenge)
+            db.session.flush()
+            
+            # Создаем флаги для всех пользователей
+            all_users = User.query.filter_by(is_admin=False).all()
+            
+            if generator_type == 'SimpleStegano':
+                # Для стеганографии создаем файлы
+                public_dir = os.path.join('static', 'uploads', new_challenge.id)
+                new_challenge.public_files_path = public_dir
+                
+                for user in all_users:
+                    # Генерируем уникальный флаг для каждого
+                    user_flag_value = TaskGenerator.generate_flag()
+                    user_dir = os.path.join(app.root_path, public_dir, user.id)
+                    os.makedirs(user_dir, exist_ok=True)
+                    
+                    # Создаем файл с флагом для пользователя
+                    image_path = task_data['image_path']
+                    if not image_path.startswith('/'):
+                        image_path = os.path.join(autotask_path, image_path)
+                    
+                    user_steg = GeneratorClass(image_path=image_path)
+                    user_steg.generate(flag=user_flag_value, save_path=user_dir)
+                    
+                    # Сохраняем флаг
+                    user_flag = UserFlag(
+                        user_id=user.id,
+                        challenge_id=new_challenge.id,
+                        flag=user_flag_value
+                    )
+                    db.session.add(user_flag)
+                    
+                    # Сохраняем файл
+                    user_file = UserFile(
+                        user_id=user.id,
+                        challenge_id=new_challenge.id,
+                        file_path=os.path.join(public_dir, user.id, 'stegano_image.png'),
+                        file_name='stegano_image.png'
+                    )
+                    db.session.add(user_file)
+            else:
+                # Для простого Challenge - генерируем уникальные флаги
+                for user in all_users:
+                    user_flag_value = TaskGenerator.generate_flag()
+                    user_flag = UserFlag(
+                        user_id=user.id,
+                        challenge_id=new_challenge.id,
+                        flag=user_flag_value
+                    )
+                    db.session.add(user_flag)
+            
+            db.session.commit()
+            
+            flash(f"✓ Таск '{task_data['title']}' успешно создан и доступен для всех пользователей!", "success")
+            
+            return render_template('admin/task_result.html', 
+                                   generator_type=generator_type,
+                                   task_data=task_data,
+                                   task_info=info,
+                                   challenge_id=new_challenge.id,
+                                   users_count=len(all_users))
+            
+        except Exception as e:
+            flash(f"Ошибка при выполнении таска: {str(e)}", "error")
+            return redirect(url_for('admin_run_task'))
+    
+    return render_template('admin/run_task.html', generators=generators.keys())
+
+
+@app.route('/admin/api/create-task', methods=['POST'])
+@admin_required
+def admin_api_create_task():
+    """
+    API endpoint для создания задач через autotask генераторы.
+    Поддерживает: Simple Challenge, SimpleStegano и другие.
+    """
+    try:
+        data = request.get_json()
+        
+        # Базовые параметры
+        title = data.get('title')
+        description = data.get('description')
+        difficulty = data.get('difficulty', 'Easy')
+        category_id = data.get('category_id')
+        points = int(data.get('points', 100))
+        hint = data.get('hint', '')
+        
+        # Параметры генератора
+        generator_type = data.get('generator_type', 'simple')  # simple, stegano
+        generator_params = data.get('generator_params', {})
+        
+        if not title or not description:
+            return {'error': 'Название и описание обязательны'}, 400
+        
+        # Создаем новую задачу
+        new_chall = Challenge(
+            title=title,
+            description=description,
+            points=points,
+            difficulty=Difficulty(difficulty),
+            category_id=category_id,
+            hint=hint,
+            author_id=current_user.id
+        )
+        db.session.add(new_chall)
+        db.session.flush()  # Получаем ID
+        
+        # Получаем категорию
+        cat_obj = Category.query.get(category_id) if category_id else None
+        all_users = User.query.filter_by(is_admin=False).all()
+        
+        # Генерируем задачи в зависимости от типа
+        created_count = 0
+        
+        if generator_type == 'simple':
+            # Простой генератор - базовый флаг с шаблоном
+            for user in all_users:
+                from autotask.examples import Challenge as SimpleChallenge
+                simple = SimpleChallenge(description=description)
+                flag = TaskGenerator.generate_flag()
+                simple.generate(flag=flag)
+                
+                user_flag = UserFlag(
+                    user_id=user.id,
+                    challenge_id=new_chall.id,
+                    flag=flag
+                )
+                db.session.add(user_flag)
+                created_count += 1
+        
+        elif generator_type == 'stegano':
+            # Стеганография - скрытие флага в изображение
+            image_path = generator_params.get('image_path', 'autotask/frame.png')
+            full_image_path = os.path.join(app.root_path, image_path)
+            
+            if not os.path.exists(full_image_path):
+                return {'error': f'Изображение не найдено: {image_path}'}, 400
+            
+            public_dir = os.path.join('static', 'uploads', new_chall.id)
+            new_chall.public_files_path = public_dir
+            
+            for user in all_users:
+                from autotask.examples import SimpleStegano
+                flag = TaskGenerator.generate_flag()
+                user_dir = os.path.join(app.root_path, public_dir, user.id)
+                
+                steg = SimpleStegano(image_path=full_image_path, description=description)
+                steg.generate(flag=flag, save_path=user_dir)
+                
+                user_flag = UserFlag(
+                    user_id=user.id,
+                    challenge_id=new_chall.id,
+                    flag=flag
+                )
+                db.session.add(user_flag)
+                
+                user_file = UserFile(
+                    user_id=user.id,
+                    challenge_id=new_chall.id,
+                    file_path=os.path.join(public_dir, user.id, 'stegano_image.png'),
+                    file_name='stegano_image.png'
+                )
+                db.session.add(user_file)
+                created_count += 1
+        
+        elif generator_type == 'custom':
+            # Пользовательский генератор - используем переданный флаг
+            flag = data.get('flag')
+            if not flag:
+                return {'error': 'Флаг обязателен для custom генератора'}, 400
+            
+            for user in all_users:
+                user_flag = UserFlag(
+                    user_id=user.id,
+                    challenge_id=new_chall.id,
+                    flag=flag
+                )
+                db.session.add(user_flag)
+                created_count += 1
+        
+        db.session.commit()
+        
+        return {
+            'success': True,
+            'message': f'Задача создана. Флаги сгенерированы для {created_count} пользователей.',
+            'challenge_id': new_chall.id
+        }, 201
+    
+    except Exception as e:
+        db.session.rollback()
+        return {'error': str(e)}, 500
+
 
 @app.route('/admin/users/<user_id>/<action>')
 @admin_required
@@ -506,8 +918,18 @@ def pvp_submit():
     if not match.is_active:
         flash("Матч уже завершен!", "error")
         return redirect(url_for('pvp_arena', match_id=match.id))
-        
-    if flag == match.challenge.flag:
+    
+    # Получаем индивидуальный флаг пользователя для задачи
+    user_flag_record = UserFlag.query.filter_by(user_id=current_user.id, challenge_id=match.challenge_id).first()
+    
+    # Если флага еще нет, создаем его
+    if not user_flag_record:
+        flag_value = TaskGenerator.generate_flag()
+        user_flag_record = UserFlag(user_id=current_user.id, challenge_id=match.challenge_id, flag=flag_value)
+        db.session.add(user_flag_record)
+        db.session.commit()
+    
+    if flag == user_flag_record.flag:
         # ПОБЕДА!
         match.is_active = False
         match.winner_id = current_user.id

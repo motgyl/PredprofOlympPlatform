@@ -36,6 +36,8 @@ class User(db.Model, UserMixin):
 
     challenges = db.relationship("Challenge", backref="author", lazy=True)
     solves = db.relationship("Solve", backref="user", lazy=True, cascade="all, delete-orphan")
+    user_flags = db.relationship("UserFlag", backref="user", lazy=True, cascade="all, delete-orphan")
+    user_files = db.relationship("UserFile", backref="user", lazy=True, cascade="all, delete-orphan")
     
     queue_entry = db.relationship("MatchmakingQueue", backref="user", uselist=False, cascade="all, delete-orphan")
 
@@ -62,7 +64,6 @@ class Challenge(db.Model):
     description = db.Column(db.Text, nullable=False)
     hint = db.Column(db.Text)
     public_files_path = db.Column(db.Text)
-    flag = db.Column(db.String(128), nullable=False)
     points = db.Column(db.Integer, nullable=False)
     difficulty = db.Column(db.Enum(Difficulty), nullable=False)
     author_id = db.Column(db.String(36), db.ForeignKey("users.id"))
@@ -114,3 +115,30 @@ class Match(db.Model):
                               
     winner = db.relationship("User", foreign_keys=[winner_id], 
                              backref=db.backref("matches_won", cascade="save-update, merge")) # Здесь удалять не обязательно, т.к. удалит player1/2
+
+
+class UserFlag(db.Model):
+    """Индивидуальный флаг для каждого пользователя и задачи"""
+    __tablename__ = "user_flags"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    challenge_id = db.Column(db.String(36), db.ForeignKey("challenges.id"), nullable=False)
+    flag = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "challenge_id", name="unique_user_challenge_flag"),
+    )
+
+
+class UserFile(db.Model):
+    """Файлы, прикрепленные к пользователю для задачи"""
+    __tablename__ = "user_files"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    challenge_id = db.Column(db.String(36), db.ForeignKey("challenges.id"), nullable=False)
+    file_path = db.Column(db.Text, nullable=False)
+    file_name = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

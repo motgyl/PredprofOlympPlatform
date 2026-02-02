@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Запуск autotask тасков{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="text-white fw-bold mb-3">⚙️ Запуск тасков autotask</h2>
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-ctf-outline">← Вернуться в админку</a>
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="ctf-card p-4 shadow-glow">
+                <h4 class="text-white mb-4">🚀 Выберите генератор и запустите таск</h4>
+
+                <form method="POST" id="taskForm">
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Тип генератора</label>
+                        <select name="generator_type" id="generator_type" class="form-control ctf-input" onchange="updateGeneratorUI()" required>
+                            <option value="">-- Выберите генератор --</option>
+                            {% for gen in generators %}
+                                <option value="{{ gen }}">{{ gen }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Название таска</label>
+                        <input type="text" name="title" class="form-control ctf-input" placeholder="Например: My Test Task" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Описание</label>
+                        <textarea name="description" class="form-control ctf-input" rows="4" placeholder="Описание для таска..." required></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Флаг</label>
+                        <input type="text" name="flag" class="form-control ctf-input" placeholder="bobr{test_flag}" required>
+                    </div>
+
+                    <!-- Параметры для SimpleStegano -->
+                    <div id="stegano-params" style="display: none;">
+                        <div class="mb-3">
+                            <label class="form-label text-muted">Исходное изображение</label>
+                            <select name="image_path" class="form-control ctf-input">
+                                <option value="frame.png">frame.png</option>
+                                <option value="deliciousdrink.png">deliciousdrink.png</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted">Путь сохранения результатов</label>
+                            <input type="text" name="save_path" class="form-control ctf-input" placeholder="autotask/images/temp" value="autotask/images/temp">
+                            <small class="text-muted d-block mt-1">Относительно папки приложения или абсолютный путь</small>
+                        </div>
+                    </div>
+
+                    <div id="loading-indicator" style="display: none;" class="alert alert-info mb-3">
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        Запуск таска...
+                    </div>
+
+                    <button type="submit" class="btn btn-ctf w-100">
+                        ▶️ Запустить таск
+                    </button>
+                </form>
+
+                <div class="mt-4 pt-3 border-top border-secondary">
+                    <h5 class="text-white small">📋 Доступные генераторы:</h5>
+                    <ul class="list-unstyled small text-muted mt-2">
+                        <li><strong>Challenge</strong> - базовый генератор для простых задач с описанием</li>
+                        <li><strong>SimpleStegano</strong> - скрытие флага в метаданные изображения</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function updateGeneratorUI() {
+    const generator = document.getElementById('generator_type').value;
+    document.getElementById('stegano-params').style.display = 
+        generator === 'SimpleStegano' ? 'block' : 'none';
+}
+
+document.getElementById('taskForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    document.getElementById('loading-indicator').style.display = 'block';
+    this.submit();
+});
+</script>
+{% endblock %}

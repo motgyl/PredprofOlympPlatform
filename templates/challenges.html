@@ -59,6 +59,20 @@
                                         {{ task.description | safe }}
                                     </div>
 
+                                    {% if user_files_map.get(task.id) %}
+                                    <div class="mb-3">
+                                        <h6 class="text-accent small">Files</h6>
+                                        <div class="d-flex gap-2 flex-wrap">
+                                            {% for uf in user_files_map[task.id] %}
+                                                {% set relpath = uf.file_path.replace('static/','') %}
+                                                <a href="{{ url_for('static', filename=relpath) }}" target="_blank" class="d-block">
+                                                    <img src="{{ url_for('static', filename=relpath) }}" alt="{{ uf.file_name }}" class="img-fluid rounded" style="max-width:120px; border:1px solid rgba(255,255,255,0.05);">
+                                                </a>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
                                     {% if task.hint %}
                                     <details class="mb-4">
                                         <summary class="text-accent small cursor-pointer">Показать подсказку</summary>
