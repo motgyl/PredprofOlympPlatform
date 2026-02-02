@@ -55,11 +55,20 @@ class Category(db.Model):
 
     challenges = db.relationship("Challenge", backref="category", lazy=True)
 
+class Topic(db.Model):
+    __tablename__ = "topics"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+
+    challenges = db.relationship("Challenge", backref="topic", lazy=True)
+
 class Challenge(db.Model):
     __tablename__ = "challenges"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     category_id = db.Column(db.Integer, db.ForeignKey("categories.id"))
+    topic_id = db.Column(db.Integer, db.ForeignKey("topics.id"))
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=False)
     hint = db.Column(db.Text)
@@ -106,6 +115,7 @@ class Match(db.Model):
     winner_id = db.Column(db.String(36), db.ForeignKey("users.id"))
     
     is_active = db.Column(db.Boolean, default=True)
+    status = db.Column(db.String(24), default="active")  # active, finished, draw, cancelled
 
     player1 = db.relationship("User", foreign_keys=[player1_id], 
                               backref=db.backref("matches_as_player1", cascade="all, delete-orphan"))

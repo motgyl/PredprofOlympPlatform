@@ -1,5 +1,7 @@
 import os
 import json
+import csv
+import io
 try:
     import eventlet
     eventlet.monkey_patch()
@@ -9,16 +11,17 @@ from functools import wraps
 from flask import Flask, render_template, redirect, url_for, flash, request, abort
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_socketio import SocketIO, join_room, leave_room, emit
+from sqlalchemy import func, text
 from werkzeug.security import generate_password_hash
 import random
 from datetime import datetime, timedelta
 
 # Импортируем модели и настройки
-from models import db, User, Category, Challenge, Solve, Difficulty, UserFlag, UserFile, MatchTask, MatchAttempt
+from models import db, User, Category, Topic, Challenge, Solve, Difficulty, UserFlag, UserFile, MatchTask, MatchAttempt
 from config import Config
 from generators import TaskGenerator 
 from models import Match, MatchmakingQueue
-from utils import calculate_elo
+from utils import calculate_elo, calculate_elo_result
 from autotask.examples import SimpleStegano
 
 
@@ -37,6 +40,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet" if even
 match_presence = {}
 PVP_TASKS_COUNT = int(os.getenv('PVP_TASKS_COUNT', 3))
 PVP_MATCH_DURATION_SECONDS = int(os.getenv('PVP_MATCH_DURATION_SECONDS', 600))
+PVP_ELO_RANGE = int(os.getenv('PVP_ELO_RANGE', 200))
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
@@ -109,6 +113,7 @@ def _apply_match_result(match, winner_id=None):
     match.is_active = False
     match.winner_id = winner_id
     match.end_time = datetime.utcnow()
+    match.status = "draw" if not winner_id else "finished"
 
     if not winner_id:
         return
@@ -119,20 +124,29 @@ def _apply_match_result(match, winner_id=None):
     if not winner or not loser:
         return
 
-    new_winner_elo, new_loser_elo = calculate_elo(winner.elo_rating, loser.elo_rating)
-    winner.elo_rating = new_winner_elo
+    if winner_id == match.player1_id:
+        p1 = winner
+        p2 = loser
+        result_p1 = 1.0
+    else:
+        p1 = loser
+        p2 = winner
+        result_p1 = 0.0
+    new_p1, new_p2 = calculate_elo_result(p1.elo_rating, p2.elo_rating, result_p1)
+    p1.elo_rating = new_p1
+    p2.elo_rating = new_p2
 
     match_tasks = _get_match_tasks(match)
     total_points = sum(mt.challenge.points for mt in match_tasks if mt.challenge)
     if total_points == 0 and match.challenge:
         total_points = match.challenge.points
     winner.user_points += (total_points + 50)
-    loser.elo_rating = new_loser_elo
 
 def _apply_match_no_score(match):
     match.is_active = False
     match.winner_id = None
     match.end_time = datetime.utcnow()
+    match.status = "cancelled"
 
 def _finalize_match_by_counts(match):
     if not match.is_active:
@@ -155,7 +169,19 @@ def _finalize_match_by_counts(match):
         elif p2_incorrect < p1_incorrect:
             winner_id = match.player2_id
 
-    _apply_match_result(match, winner_id)
+    if winner_id:
+        _apply_match_result(match, winner_id)
+    else:
+        match.is_active = False
+        match.winner_id = None
+        match.end_time = datetime.utcnow()
+        match.status = "draw"
+        p1 = User.query.get(match.player1_id)
+        p2 = User.query.get(match.player2_id)
+        if p1 and p2:
+            new_p1, new_p2 = calculate_elo_result(p1.elo_rating, p2.elo_rating, 0.5)
+            p1.elo_rating = new_p1
+            p2.elo_rating = new_p2
     db.session.commit()
     return True
 
@@ -261,12 +287,27 @@ def init_app_data():
                     pass
             # 1. Создаем таблицы
             db.create_all()
+
+            # Мягкие миграции для новых колонок
+            try:
+                db.session.execute(text("ALTER TABLE challenges ADD COLUMN IF NOT EXISTS topic_id INTEGER"))
+            except Exception:
+                db.session.rollback()
+            try:
+                db.session.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS status VARCHAR(24) DEFAULT 'active'"))
+            except Exception:
+                db.session.rollback()
             
             # 2. Создаем базовые категории
             cats = ['Cryptography', 'Web', 'Logic', 'Reverse', 'Forensics']
             for c_name in cats:
                 if not Category.query.filter_by(name=c_name).first():
                     db.session.add(Category(name=c_name))
+            # 2.1 Базовые темы
+            base_topics = ['Basics', 'Networking', 'Crypto', 'Web Exploit', 'Reverse', 'Forensics', 'Logic']
+            for t_name in base_topics:
+                if not Topic.query.filter_by(name=t_name).first():
+                    db.session.add(Topic(name=t_name))
             
             # 3. Создаем/Обновляем Админа (данные из .env)
             admin_user = os.getenv('ADMIN_USER', 'admin')
@@ -571,11 +612,61 @@ def profile(user_id):
             chart_labels.append(solve.solved_at.strftime('%Y-%m-%d %H:%M'))
             chart_data.append(running_score)
 
+    # 4. PVP АНАЛИТИКА
+    pvp_matches = Match.query.filter(
+        (Match.player1_id == user.id) | (Match.player2_id == user.id)
+    ).all()
+
+    pvp_match_ids = [m.id for m in pvp_matches]
+    pvp_tasks_total = 0
+    pvp_tasks_solved = 0
+    speed_samples = []
+
+    if pvp_match_ids:
+        match_tasks = MatchTask.query.filter(MatchTask.match_id.in_(pvp_match_ids)).all()
+        pvp_tasks_total = len(match_tasks)
+        match_by_id = {m.id: m for m in pvp_matches}
+        for mt in match_tasks:
+            if mt.solved_by_user_id == user.id and mt.solved_at:
+                pvp_tasks_solved += 1
+                match = match_by_id.get(mt.match_id)
+                if match and match.start_time:
+                    delta = (mt.solved_at - match.start_time).total_seconds()
+                    if delta >= 0:
+                        speed_samples.append(delta)
+
+        attempts = MatchAttempt.query.filter(
+            MatchAttempt.match_id.in_(pvp_match_ids),
+            MatchAttempt.user_id == user.id
+        ).all()
+    else:
+        attempts = []
+
+    correct_attempts = sum(1 for a in attempts if a.is_correct)
+    total_attempts = len(attempts)
+    accuracy = (correct_attempts / total_attempts) * 100 if total_attempts else 0.0
+
+    if speed_samples:
+        avg_speed = sum(speed_samples) / len(speed_samples)
+    else:
+        avg_speed = 0
+
+    minutes = int(avg_speed // 60)
+    seconds = int(avg_speed % 60)
+    avg_speed_label = f"{minutes:02d}:{seconds:02d}" if avg_speed > 0 else "—"
+
+    progress = (pvp_tasks_solved / pvp_tasks_total) * 100 if pvp_tasks_total else 0.0
+
     return render_template('profile.html', 
                            user=user, 
                            is_own_profile=is_own_profile,
                            chart_labels=json.dumps(chart_labels),
-                           chart_data=json.dumps(chart_data))
+                           chart_data=json.dumps(chart_data),
+                           pvp_avg_speed=avg_speed_label,
+                           pvp_accuracy=round(accuracy, 1),
+                           pvp_progress=round(progress, 1),
+                           pvp_tasks_solved=pvp_tasks_solved,
+                           pvp_tasks_total=pvp_tasks_total)
 
 @app.route('/board')
 def dashboard():
@@ -600,16 +691,36 @@ def dashboard():
 @app.route('/challenges')
 @login_required
 def challenges_list():
-    # Загружаем категории и связанные с ними задачи
-    # Фильтруем категории, в которых есть хотя бы одна задача (опционально)
+    # Фильтры
+    category_id = request.args.get('category', '')
+    topic_id = request.args.get('topic', '')
+    difficulty = request.args.get('difficulty', '')
+
     categories = Category.query.all()
+    topics = Topic.query.order_by(Topic.name).all()
+
+    base_query = Challenge.query.filter_by(is_active=True)
+    if category_id:
+        base_query = base_query.filter_by(category_id=int(category_id))
+    if topic_id:
+        base_query = base_query.filter_by(topic_id=int(topic_id))
+    if difficulty:
+        try:
+            base_query = base_query.filter_by(difficulty=Difficulty(difficulty))
+        except Exception:
+            difficulty = ''
+
+    filtered_challenges = base_query.all()
+    filtered_ids = {c.id for c in filtered_challenges}
+
+    # Загружаем категории и связанные с ними задачи
     categories_with_tasks = []
     for category in categories:
-        tasks = Challenge.query.filter_by(category_id=category.id, is_active=True).all()
+        tasks = [c for c in filtered_challenges if c.category_id == category.id]
         if tasks:
             categories_with_tasks.append({'name': category.name, 'tasks': tasks})
 
-    uncategorized = Challenge.query.filter_by(category_id=None, is_active=True).all()
+    uncategorized = [c for c in filtered_challenges if c.category_id is None]
     if uncategorized:
         categories_with_tasks.append({'name': 'Без категории', 'tasks': uncategorized})
     
@@ -622,9 +733,14 @@ def challenges_list():
         files_map.setdefault(uf.challenge_id, []).append(uf)
     
     return render_template('challenges.html', 
-                           categories=categories_with_tasks, 
+                           categories=categories_with_tasks,
                            solved_ids=solved_challenges_ids,
-                           user_files_map=files_map)
+                           user_files_map=files_map,
+                           categories_filter=categories,
+                           topics_filter=topics,
+                           current_category=category_id,
+                           current_topic=topic_id,
+                           current_difficulty=difficulty)
 
 @app.route('/challenges/submit', methods=['POST'])
 @login_required
@@ -684,6 +800,7 @@ def admin_dashboard():
     solves_count = Solve.query.count()
     # Передаем категории в шаблон
     categories = Category.query.all()
+    topics = Topic.query.order_by(Topic.name).all()
     # Непубликованные задачи (для админа) - те, которые не активны
     unpublished = Challenge.query.filter_by(is_active=False).order_by(Challenge.id.desc()).all()
     return render_template('admin/dashboard.html', 
@@ -691,6 +808,7 @@ def admin_dashboard():
                            challenges_count=challenges_count, 
                            solves_count=solves_count,
                            categories=categories,
+                           topics=topics,
                            unpublished=unpublished)
 
 
@@ -746,6 +864,7 @@ def admin_create_challenge():
     points = int(request.form.get('points'))
     difficulty = request.form.get('difficulty')
     category_id = request.form.get('category_id')
+    topic_id = request.form.get('topic_id') or None
     hint = request.form.get('hint')
 
     new_chall = Challenge(
@@ -754,6 +873,7 @@ def admin_create_challenge():
         points=points,
         difficulty=Difficulty(difficulty),
         category_id=category_id,
+        topic_id=topic_id,
         hint=hint,
         author_id=current_user.id
     )
@@ -866,12 +986,15 @@ def admin_run_task():
     if request.method == 'POST':
         generator_type = request.form.get('generator_type')
         raw_category_id = request.form.get('category_id')
+        raw_topic_id = request.form.get('topic_id')
         category_id = int(raw_category_id) if raw_category_id else None
+        topic_id = int(raw_topic_id) if raw_topic_id else None
         task_data = {
             'title': request.form.get('title'),
             'description': request.form.get('description'),
             'flag': request.form.get('flag'),
-            'category_id': category_id
+            'category_id': category_id,
+            'topic_id': topic_id
         }
         
         # Параметры в зависимости от типа
@@ -918,7 +1041,8 @@ def admin_run_task():
                 points=100,
                 difficulty=Difficulty.EASY,
                 author_id=current_user.id,
-                category_id=task_data['category_id'] or None
+                category_id=task_data['category_id'] or None,
+                topic_id=task_data['topic_id'] or None
             )
             db.session.add(new_challenge)
             db.session.flush()
@@ -987,7 +1111,8 @@ def admin_run_task():
             flash(f"Ошибка при выполнении таска: {str(e)}", "error")
             return redirect(url_for('admin_run_task'))
     
-    return render_template('admin/run_task.html', generators=generators.keys(), categories=categories)
+    topics = Topic.query.order_by(Topic.name).all()
+    return render_template('admin/run_task.html', generators=generators.keys(), categories=categories, topics=topics)
 
 
 @app.route('/admin/api/create-task', methods=['POST'])
@@ -1005,6 +1130,7 @@ def admin_api_create_task():
         description = data.get('description')
         difficulty = data.get('difficulty', 'Easy')
         category_id = data.get('category_id')
+        topic_id = data.get('topic_id')
         points = int(data.get('points', 100))
         hint = data.get('hint', '')
         
@@ -1022,6 +1148,7 @@ def admin_api_create_task():
             points=points,
             difficulty=Difficulty(difficulty),
             category_id=category_id,
+            topic_id=topic_id,
             hint=hint,
             author_id=current_user.id
         )
@@ -1140,6 +1267,158 @@ def admin_user_action(user_id, action):
     db.session.commit()
     return redirect(url_for('admin_users'))
 
+@app.route('/admin/export/tasks.json')
+@admin_required
+def admin_export_tasks_json():
+    tasks = Challenge.query.order_by(Challenge.id).all()
+    payload = []
+    for ch in tasks:
+        payload.append({
+            'title': ch.title,
+            'description': ch.description,
+            'points': ch.points,
+            'difficulty': ch.difficulty.value,
+            'category': ch.category.name if ch.category else '',
+            'topic': ch.topic.name if ch.topic else '',
+            'hint': ch.hint or '',
+            'is_active': ch.is_active
+        })
+    return app.response_class(
+        response=json.dumps(payload, ensure_ascii=False),
+        mimetype='application/json'
+    )
+
+@app.route('/admin/export/tasks.csv')
+@admin_required
+def admin_export_tasks_csv():
+    tasks = Challenge.query.order_by(Challenge.id).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['title', 'description', 'points', 'difficulty', 'category', 'topic', 'hint', 'is_active'])
+    for ch in tasks:
+        writer.writerow([
+            ch.title,
+            ch.description,
+            ch.points,
+            ch.difficulty.value,
+            ch.category.name if ch.category else '',
+            ch.topic.name if ch.topic else '',
+            ch.hint or '',
+            '1' if ch.is_active else '0'
+        ])
+    return app.response_class(
+        response=output.getvalue(),
+        mimetype='text/csv'
+    )
+
+@app.route('/admin/import/tasks', methods=['POST'])
+@admin_required
+def admin_import_tasks():
+    upload = request.files.get('file')
+    if not upload:
+        flash('Файл не выбран.', 'error')
+        return redirect(url_for('admin_dashboard'))
+
+    filename = upload.filename.lower()
+    content = upload.read()
+    created = 0
+    skipped = 0
+
+    def get_or_create_category(name):
+        if not name:
+            return None
+        cat = Category.query.filter_by(name=name).first()
+        if not cat:
+            cat = Category(name=name)
+            db.session.add(cat)
+            db.session.flush()
+        return cat
+
+    def get_or_create_topic(name):
+        if not name:
+            return None
+        topic = Topic.query.filter_by(name=name).first()
+        if not topic:
+            topic = Topic(name=name)
+            db.session.add(topic)
+            db.session.flush()
+        return topic
+
+    def create_task(item):
+        nonlocal created, skipped
+        title = (item.get('title') or '').strip()
+        description = (item.get('description') or '').strip()
+        if not title or not description:
+            skipped += 1
+            return
+
+        difficulty_value = item.get('difficulty', 'Easy')
+        try:
+            difficulty = Difficulty(difficulty_value)
+        except Exception:
+            difficulty = Difficulty.EASY
+
+        category = get_or_create_category(item.get('category', '').strip())
+        topic = get_or_create_topic(item.get('topic', '').strip())
+
+        existing = Challenge.query.filter_by(
+            title=title,
+            category_id=category.id if category else None,
+            topic_id=topic.id if topic else None
+        ).first()
+        if existing:
+            skipped += 1
+            return
+
+        ch = Challenge(
+            title=title,
+            description=description,
+            points=int(item.get('points', 100)),
+            difficulty=difficulty,
+            category_id=category.id if category else None,
+            topic_id=topic.id if topic else None,
+            hint=item.get('hint', ''),
+            author_id=current_user.id,
+            is_active=bool(int(item.get('is_active', 1))) if str(item.get('is_active', '')).isdigit() else True
+        )
+        db.session.add(ch)
+        db.session.flush()
+
+        all_users = User.query.filter_by(is_admin=False).all()
+        for user in all_users:
+            user_flag = UserFlag(
+                user_id=user.id,
+                challenge_id=ch.id,
+                flag=TaskGenerator.generate_flag()
+            )
+            db.session.add(user_flag)
+
+        created += 1
+
+    try:
+        if filename.endswith('.json'):
+            data = json.loads(content.decode('utf-8'))
+            if isinstance(data, dict):
+                data = data.get('tasks', [])
+            for item in data:
+                create_task(item)
+        elif filename.endswith('.csv'):
+            text = content.decode('utf-8')
+            reader = csv.DictReader(io.StringIO(text))
+            for row in reader:
+                create_task(row)
+        else:
+            flash('Неподдерживаемый формат файла. Используйте CSV или JSON.', 'error')
+            return redirect(url_for('admin_dashboard'))
+
+        db.session.commit()
+        flash(f'Импорт завершен. Создано: {created}, пропущено: {skipped}', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка импорта: {str(e)}', 'error')
+
+    return redirect(url_for('admin_dashboard'))
+
 
 # ==========================================
 # PVP СИСТЕМА (1 vs 1)
@@ -1167,7 +1446,11 @@ def pvp_lobby():
 def pvp_join():
     # 1. Проверяем, есть ли кто-то в очереди
     # Ищем соперника с рейтингом +/- 300 (упрощенно - любого, кроме себя)
-    opponent_entry = MatchmakingQueue.query.filter(MatchmakingQueue.user_id != current_user.id).first()
+    opponent_entry = MatchmakingQueue.query.filter(
+        MatchmakingQueue.user_id != current_user.id,
+        MatchmakingQueue.current_elo >= current_user.elo_rating - PVP_ELO_RANGE,
+        MatchmakingQueue.current_elo <= current_user.elo_rating + PVP_ELO_RANGE
+    ).order_by(func.abs(MatchmakingQueue.current_elo - current_user.elo_rating)).first()
     
     if opponent_entry:
         # СОПЕРНИК НАЙДЕН! СОЗДАЕМ МАТЧ

@@ -7,7 +7,11 @@
         <div class="col-md-8">
             <div class="ctf-card p-5 shadow-glow">
                 
-                {% if match.winner_id == current_user.id %}
+                {% if match.status == 'cancelled' %}
+                    <h1 class="display-1 mb-4">⚠️</h1>
+                    <h2 class="text-warning fw-bold mb-3">МАТЧ ОТМЕНЁН</h2>
+                    <p class="lead text-white">Техническая ошибка или обрыв соединения.</p>
+                {% elif match.winner_id == current_user.id %}
                     <h1 class="display-1 mb-4">🏆</h1>
                     <h2 class="text-success fw-bold mb-3">ПОБЕДА!</h2>
                     <p class="lead text-white">Вы уничтожили соперника.</p>

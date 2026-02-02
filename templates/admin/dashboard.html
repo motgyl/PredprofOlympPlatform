@@ -55,7 +55,7 @@
                 </ul>
 
                 <!-- Навигация (Табы) -->
-                <div class="tab-content" id="adminTabContent">
+        <div class="tab-content" id="adminTabContent">
                     <!-- РУЧНОЕ СОЗДАНИЕ -->
                     <div class="tab-pane fade show active" id="manual" role="tabpanel">
                         <form action="{{ url_for('admin_create_challenge') }}" method="POST">
@@ -68,7 +68,7 @@
                                 <textarea name="description" class="form-control ctf-input" rows="3" required></textarea>
                             </div>
                             <div class="row">
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-4 mb-3">
                                     <label class="form-label text-muted">Категория</label>
                                     <select name="category_id" class="form-control ctf-input">
                                         {% for cat in categories %}
@@ -76,7 +76,16 @@
                                         {% endfor %}
                                     </select>
                                 </div>
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label text-muted">Тема</label>
+                                    <select name="topic_id" class="form-control ctf-input">
+                                        <option value="">—</option>
+                                        {% for topic in topics %}
+                                            <option value="{{ topic.id }}">{{ topic.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
                                     <label class="form-label text-muted">Сложность</label>
                                     <select name="difficulty" class="form-control ctf-input">
                                         <option value="Easy">Easy</option>
@@ -103,6 +112,19 @@
                         </form>
                     </div>
 
+                    <div class="ctf-card p-4 mt-4">
+                        <h5 class="text-white mb-3">Импорт / Экспорт задач</h5>
+                        <div class="d-flex flex-wrap gap-2 mb-3">
+                            <a href="{{ url_for('admin_export_tasks_json') }}" class="btn btn-ctf-outline btn-sm">Export JSON</a>
+                            <a href="{{ url_for('admin_export_tasks_csv') }}" class="btn btn-ctf-outline btn-sm">Export CSV</a>
+                        </div>
+                        <form action="{{ url_for('admin_import_tasks') }}" method="POST" enctype="multipart/form-data" class="d-flex flex-wrap gap-2">
+                            <input type="file" name="file" class="form-control ctf-input" accept=".json,.csv" required>
+                            <button type="submit" class="btn btn-ctf">Импорт</button>
+                        </form>
+                        <div class="text-muted small mt-2">Форматы: CSV (title,description,points,difficulty,category,topic,hint,is_active) или JSON (массив объектов).</div>
+                    </div>
+
                     <!-- АВТОГЕНЕРАЦИЯ -->
                     <div class="tab-pane fade" id="autogen" role="tabpanel">
                         <form id="autogenForm">
@@ -121,6 +143,15 @@
                                     <select id="ag_category_id" class="form-control ctf-input">
                                         {% for cat in categories %}
                                             <option value="{{ cat.id }}">{{ cat.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Тема</label>
+                                    <select id="ag_topic_id" class="form-control ctf-input">
+                                        <option value="">—</option>
+                                        {% for topic in topics %}
+                                            <option value="{{ topic.id }}">{{ topic.name }}</option>
                                         {% endfor %}
                                     </select>
                                 </div>
@@ -224,6 +255,7 @@ async function submitAutogenForm() {
     const title = document.getElementById('ag_title').value;
     const description = document.getElementById('ag_description').value;
     const category_id = document.getElementById('ag_category_id').value;
+    const topic_id = document.getElementById('ag_topic_id').value;
     const difficulty = document.getElementById('ag_difficulty').value;
     const points = document.getElementById('ag_points').value;
     const hint = document.getElementById('ag_hint').value;
@@ -238,6 +270,7 @@ async function submitAutogenForm() {
         title,
         description,
         category_id,
+        topic_id,
         difficulty,
         points,
         hint,

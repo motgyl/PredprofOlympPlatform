@@ -9,6 +9,46 @@
         <p class="text-muted">Решай задачи, получай флаги, повышай рейтинг.</p>
     </div>
 
+    <div class="ctf-card p-3 mb-4">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label text-muted small">Предмет (категория)</label>
+                <select name="category" class="form-control ctf-input">
+                    <option value="">Все</option>
+                    {% for c in categories_filter %}
+                        <option value="{{ c.id }}" {% if current_category == c.id|string %}selected{% endif %}>
+                            {{ c.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label text-muted small">Тема</label>
+                <select name="topic" class="form-control ctf-input">
+                    <option value="">Все</option>
+                    {% for t in topics_filter %}
+                        <option value="{{ t.id }}" {% if current_topic == t.id|string %}selected{% endif %}>
+                            {{ t.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label text-muted small">Сложность</label>
+                <select name="difficulty" class="form-control ctf-input">
+                    <option value="">Все</option>
+                    <option value="Easy" {% if current_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
+                    <option value="Medium" {% if current_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
+                    <option value="Hard" {% if current_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
+                    <option value="Insane" {% if current_difficulty == 'Insane' %}selected{% endif %}>Insane</option>
+                </select>
+            </div>
+            <div class="col-md-1 d-grid">
+                <button type="submit" class="btn btn-ctf">OK</button>
+            </div>
+        </form>
+    </div>
+
     {% for category in categories %}
         {% if category.tasks %}
         <div class="mb-5">
