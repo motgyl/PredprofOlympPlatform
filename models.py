@@ -116,6 +116,37 @@ class Match(db.Model):
     winner = db.relationship("User", foreign_keys=[winner_id], 
                              backref=db.backref("matches_won", cascade="save-update, merge")) # Здесь удалять не обязательно, т.к. удалит player1/2
 
+    match_tasks = db.relationship("MatchTask", backref="match", lazy=True, cascade="all, delete-orphan")
+    match_attempts = db.relationship("MatchAttempt", backref="match", lazy=True, cascade="all, delete-orphan")
+
+
+class MatchTask(db.Model):
+    __tablename__ = "match_tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    match_id = db.Column(db.Integer, db.ForeignKey("matches.id"), nullable=False)
+    challenge_id = db.Column(db.String(36), db.ForeignKey("challenges.id"), nullable=False)
+    order_index = db.Column(db.Integer, nullable=False, default=0)
+    solved_by_user_id = db.Column(db.String(36), db.ForeignKey("users.id"))
+    solved_at = db.Column(db.DateTime)
+
+    challenge = db.relationship("Challenge", backref=db.backref("match_tasks", cascade="all, delete-orphan"))
+    solved_by = db.relationship("User", foreign_keys=[solved_by_user_id])
+
+
+class MatchAttempt(db.Model):
+    __tablename__ = "match_attempts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    match_id = db.Column(db.Integer, db.ForeignKey("matches.id"), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    challenge_id = db.Column(db.String(36), db.ForeignKey("challenges.id"), nullable=False)
+    is_correct = db.Column(db.Boolean, default=False)
+    submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", foreign_keys=[user_id])
+    challenge = db.relationship("Challenge", foreign_keys=[challenge_id])
+
 
 class UserFlag(db.Model):
     """Индивидуальный флаг для каждого пользователя и задачи"""

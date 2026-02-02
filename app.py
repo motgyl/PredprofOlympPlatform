@@ -1,14 +1,20 @@
 import os
 import json
+try:
+    import eventlet
+    eventlet.monkey_patch()
+except Exception:
+    eventlet = None
 from functools import wraps
 from flask import Flask, render_template, redirect, url_for, flash, request, abort
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from flask_socketio import SocketIO, join_room, leave_room, emit
 from werkzeug.security import generate_password_hash
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Импортируем модели и настройки
-from models import db, User, Category, Challenge, Solve, Difficulty, UserFlag, UserFile
+from models import db, User, Category, Challenge, Solve, Difficulty, UserFlag, UserFile, MatchTask, MatchAttempt
 from config import Config
 from generators import TaskGenerator 
 from models import Match, MatchmakingQueue
@@ -26,6 +32,12 @@ login_manager.login_view = 'login'
 login_manager.login_message = "Пожалуйста, войдите в систему."
 login_manager.login_message_category = "error"
 
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet" if eventlet else "threading")
+
+match_presence = {}
+PVP_TASKS_COUNT = int(os.getenv('PVP_TASKS_COUNT', 3))
+PVP_MATCH_DURATION_SECONDS = int(os.getenv('PVP_MATCH_DURATION_SECONDS', 600))
+
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 @login_manager.user_loader
@@ -41,6 +53,198 @@ def admin_required(f):
             return redirect(url_for('home'))
         return f(*args, **kwargs)
     return decorated_function
+
+def _match_room(match_id):
+    return f"match_{match_id}"
+
+def _get_match_tasks(match):
+    tasks = MatchTask.query.filter_by(match_id=match.id).order_by(MatchTask.order_index).all()
+    if tasks:
+        return tasks
+    if match.challenge_id:
+        return [MatchTask(match_id=match.id, challenge_id=match.challenge_id, order_index=0, challenge=match.challenge)]
+    return []
+
+def _build_match_state(match):
+    tasks = _get_match_tasks(match)
+    task_states = {}
+    for mt in tasks:
+        task_states[mt.challenge_id] = {
+            'solved_by_user_id': mt.solved_by_user_id,
+            'solved_at': mt.solved_at.isoformat() if mt.solved_at else None
+        }
+
+    players = [match.player1_id, match.player2_id]
+    stats = {}
+    for user_id in players:
+        correct_count = MatchAttempt.query.filter_by(match_id=match.id, user_id=user_id, is_correct=True).count()
+        incorrect_count = MatchAttempt.query.filter_by(match_id=match.id, user_id=user_id, is_correct=False).count()
+        stats[user_id] = {
+            'correct': correct_count,
+            'incorrect': incorrect_count
+        }
+
+    return {
+        'task_states': task_states,
+        'stats': stats
+    }
+
+def _match_end_time(match):
+    return match.start_time + timedelta(seconds=PVP_MATCH_DURATION_SECONDS)
+
+def _match_time_left_seconds(match):
+    remaining = int((_match_end_time(match) - datetime.utcnow()).total_seconds())
+    return max(0, remaining)
+
+def _solved_count_by_user(match_tasks, user_id):
+    return sum(1 for mt in match_tasks if mt.solved_by_user_id == user_id)
+
+def _incorrect_count(match_id, user_id):
+    return MatchAttempt.query.filter_by(match_id=match_id, user_id=user_id, is_correct=False).count()
+
+def _are_all_tasks_solved(match_tasks):
+    return all(mt.solved_by_user_id for mt in match_tasks) if match_tasks else False
+
+def _apply_match_result(match, winner_id=None):
+    match.is_active = False
+    match.winner_id = winner_id
+    match.end_time = datetime.utcnow()
+
+    if not winner_id:
+        return
+
+    loser_id = match.player2_id if match.player1_id == winner_id else match.player1_id
+    loser = User.query.get(loser_id)
+    winner = User.query.get(winner_id)
+    if not winner or not loser:
+        return
+
+    new_winner_elo, new_loser_elo = calculate_elo(winner.elo_rating, loser.elo_rating)
+    winner.elo_rating = new_winner_elo
+
+    match_tasks = _get_match_tasks(match)
+    total_points = sum(mt.challenge.points for mt in match_tasks if mt.challenge)
+    if total_points == 0 and match.challenge:
+        total_points = match.challenge.points
+    winner.user_points += (total_points + 50)
+    loser.elo_rating = new_loser_elo
+
+def _apply_match_no_score(match):
+    match.is_active = False
+    match.winner_id = None
+    match.end_time = datetime.utcnow()
+
+def _finalize_match_by_counts(match):
+    if not match.is_active:
+        return False
+
+    match_tasks = _get_match_tasks(match)
+    p1_solved = _solved_count_by_user(match_tasks, match.player1_id)
+    p2_solved = _solved_count_by_user(match_tasks, match.player2_id)
+
+    winner_id = None
+    if p1_solved > p2_solved:
+        winner_id = match.player1_id
+    elif p2_solved > p1_solved:
+        winner_id = match.player2_id
+    else:
+        p1_incorrect = _incorrect_count(match.id, match.player1_id)
+        p2_incorrect = _incorrect_count(match.id, match.player2_id)
+        if p1_incorrect < p2_incorrect:
+            winner_id = match.player1_id
+        elif p2_incorrect < p1_incorrect:
+            winner_id = match.player2_id
+
+    _apply_match_result(match, winner_id)
+    db.session.commit()
+    return True
+
+def _finalize_match_if_expired(match):
+    if not match.is_active:
+        return False
+    if _match_time_left_seconds(match) > 0:
+        return False
+    return _finalize_match_by_counts(match)
+
+def _process_attempt(user, match_id, challenge_id, flag):
+    if not match_id or not challenge_id or not flag:
+        return {'ok': False, 'message': 'Нужны match_id, challenge_id и флаг.'}, 400
+
+    match = Match.query.get(match_id)
+    if not match:
+        return {'ok': False, 'message': 'Матч не найден.'}, 404
+
+    if user.id not in [match.player1_id, match.player2_id]:
+        return {'ok': False, 'message': 'Доступ запрещен.'}, 403
+
+    if _finalize_match_if_expired(match):
+        return {
+            'ok': False,
+            'message': 'Время вышло.',
+            'match_over': True,
+            'winner_id': match.winner_id
+        }, 200
+
+    if not match.is_active:
+        return {
+            'ok': False,
+            'message': 'Матч уже завершен.',
+            'match_over': True,
+            'winner_id': match.winner_id
+        }, 200
+
+    match_task = MatchTask.query.filter_by(match_id=match.id, challenge_id=challenge_id).first()
+    if not match_task and match.challenge_id != challenge_id:
+        return {'ok': False, 'message': 'Задача не относится к матчу.'}, 400
+
+    if match_task and match_task.solved_by_user_id:
+        return {'ok': False, 'message': 'Задача уже решена.'}, 200
+
+    user_flag_record = UserFlag.query.filter_by(user_id=user.id, challenge_id=challenge_id).first()
+    if not user_flag_record:
+        flag_value = TaskGenerator.generate_flag()
+        user_flag_record = UserFlag(user_id=user.id, challenge_id=challenge_id, flag=flag_value)
+        db.session.add(user_flag_record)
+        db.session.commit()
+
+    is_correct = flag == user_flag_record.flag
+    attempt = MatchAttempt(
+        match_id=match.id,
+        user_id=user.id,
+        challenge_id=challenge_id,
+        is_correct=is_correct
+    )
+    db.session.add(attempt)
+
+    if is_correct:
+        if match_task:
+            match_task.solved_by_user_id = user.id
+            match_task.solved_at = datetime.utcnow()
+            match_tasks = _get_match_tasks(match)
+            solved_by_user = _solved_count_by_user(match_tasks, user.id)
+            if solved_by_user >= len(match_tasks):
+                _apply_match_result(match, user.id)
+            elif _are_all_tasks_solved(match_tasks):
+                _finalize_match_by_counts(match)
+        else:
+            _apply_match_result(match, user.id)
+
+    db.session.commit()
+
+    state = _build_match_state(match)
+    payload = {
+        'ok': True,
+        'user_id': user.id,
+        'username': user.username,
+        'challenge_id': challenge_id,
+        'is_correct': is_correct,
+        'match_over': not match.is_active,
+        'winner_id': match.winner_id,
+        'time_left': _match_time_left_seconds(match),
+        'stats': state['stats'],
+        'task_states': state['task_states']
+    }
+    return payload, 200
 
 # --- ИНИЦИАЛИЗАЦИЯ ПРИ СТАРТЕ ---
 @app.before_request
@@ -84,6 +288,131 @@ def init_app_data():
 
             # (Old template-based auto-generation removed — use manual creation and autotask-based generation)
             app.app_initialized = True
+
+# ==========================================
+# SOCKET.IO EVENTS
+# ==========================================
+
+@socketio.on('join_match')
+def socket_join_match(data):
+    if not current_user.is_authenticated:
+        emit('join_error', {'message': 'auth'})
+        return
+    match_id = data.get('match_id')
+    if not match_id:
+        emit('join_error', {'message': 'match_id_missing'})
+        return
+    match = Match.query.get(match_id)
+    if not match or current_user.id not in [match.player1_id, match.player2_id]:
+        emit('join_error', {'message': 'forbidden'})
+        return
+
+    _finalize_match_if_expired(match)
+
+    room = _match_room(match_id)
+    join_room(room)
+
+    presence = match_presence.setdefault(match_id, {})
+    user_sids = presence.setdefault(current_user.id, set())
+    first_connection = len(user_sids) == 0
+    user_sids.add(request.sid)
+
+    opponent_id = match.player2_id if match.player1_id == current_user.id else match.player1_id
+    opponent_connected = opponent_id in presence and len(presence.get(opponent_id, set())) > 0
+    emit('opponent_status', {
+        'user_id': opponent_id,
+        'status': 'connected' if opponent_connected else 'disconnected'
+    })
+
+    state = _build_match_state(match)
+    emit('state', {
+        'match_id': match.id,
+        'is_active': match.is_active,
+        'winner_id': match.winner_id,
+        'time_left': _match_time_left_seconds(match),
+        'task_states': state['task_states'],
+        'stats': state['stats']
+    })
+
+    if first_connection:
+        emit('opponent_status', {
+            'user_id': current_user.id,
+            'status': 'connected'
+        }, room=room, include_self=False)
+
+    emit('joined', {'ok': True})
+
+@socketio.on('leave_match')
+def socket_leave_match(data):
+    match_id = data.get('match_id')
+    if not match_id:
+        return
+    room = _match_room(match_id)
+    leave_room(room)
+
+    presence = match_presence.get(match_id, {})
+    user_sids = presence.get(current_user.id)
+    if user_sids and request.sid in user_sids:
+        user_sids.remove(request.sid)
+        if not user_sids:
+            presence.pop(current_user.id, None)
+            emit('opponent_status', {
+                'user_id': current_user.id,
+                'status': 'disconnected'
+            }, room=room, include_self=False)
+            match = Match.query.get(match_id)
+            if match and match.is_active:
+                _apply_match_no_score(match)
+                db.session.commit()
+                state = _build_match_state(match)
+                socketio.emit('attempt_update', {
+                    'match_over': True,
+                    'winner_id': None,
+                    'time_left': _match_time_left_seconds(match),
+                    'stats': state['stats'],
+                    'task_states': state['task_states']
+                }, room=room)
+
+@socketio.on('disconnect')
+def socket_disconnect():
+    for match_id, presence in list(match_presence.items()):
+        for user_id, sids in list(presence.items()):
+            if request.sid in sids:
+                sids.remove(request.sid)
+                if not sids:
+                    presence.pop(user_id, None)
+                    emit('opponent_status', {
+                        'user_id': user_id,
+                        'status': 'disconnected'
+                    }, room=_match_room(match_id), include_self=False)
+                    match = Match.query.get(match_id)
+                    if match and match.is_active:
+                        _apply_match_no_score(match)
+                        db.session.commit()
+                        state = _build_match_state(match)
+                        socketio.emit('attempt_update', {
+                            'match_over': True,
+                            'winner_id': None,
+                            'time_left': _match_time_left_seconds(match),
+                            'stats': state['stats'],
+                            'task_states': state['task_states']
+                        }, room=_match_room(match_id))
+            if not presence:
+                match_presence.pop(match_id, None)
+
+@socketio.on('submit_flag')
+def socket_submit_flag(data):
+    if not current_user.is_authenticated:
+        emit('attempt_result', {'ok': False, 'message': 'auth'})
+        return
+    match_id = data.get('match_id') if data else None
+    challenge_id = data.get('challenge_id') if data else None
+    flag = (data.get('flag') or '').strip() if data else ''
+
+    payload, _ = _process_attempt(current_user, match_id, challenge_id, flag)
+    emit('attempt_result', payload)
+    if payload.get('ok'):
+        emit('attempt_update', payload, room=_match_room(match_id), include_self=False)
 
 # ==========================================
 # РОУТЫ: АВТОРИЗАЦИЯ И ОБЩЕЕ
@@ -274,6 +603,15 @@ def challenges_list():
     # Загружаем категории и связанные с ними задачи
     # Фильтруем категории, в которых есть хотя бы одна задача (опционально)
     categories = Category.query.all()
+    categories_with_tasks = []
+    for category in categories:
+        tasks = Challenge.query.filter_by(category_id=category.id, is_active=True).all()
+        if tasks:
+            categories_with_tasks.append({'name': category.name, 'tasks': tasks})
+
+    uncategorized = Challenge.query.filter_by(category_id=None, is_active=True).all()
+    if uncategorized:
+        categories_with_tasks.append({'name': 'Без категории', 'tasks': uncategorized})
     
     # Чтобы подсветить решенные задачи, нам нужен список ID решенных задач текущим юзером
     solved_challenges_ids = [s.challenge_id for s in current_user.solves]
@@ -284,7 +622,7 @@ def challenges_list():
         files_map.setdefault(uf.challenge_id, []).append(uf)
     
     return render_template('challenges.html', 
-                           categories=categories, 
+                           categories=categories_with_tasks, 
                            solved_ids=solved_challenges_ids,
                            user_files_map=files_map)
 
@@ -504,6 +842,7 @@ def admin_run_task():
     import sys
     
     available_tasks = []
+    categories = Category.query.order_by(Category.name).all()
     autotask_path = os.path.join(app.root_path, 'autotask')
     
     # Получаем список доступных генераторов
@@ -526,10 +865,13 @@ def admin_run_task():
     
     if request.method == 'POST':
         generator_type = request.form.get('generator_type')
+        raw_category_id = request.form.get('category_id')
+        category_id = int(raw_category_id) if raw_category_id else None
         task_data = {
             'title': request.form.get('title'),
             'description': request.form.get('description'),
-            'flag': request.form.get('flag')
+            'flag': request.form.get('flag'),
+            'category_id': category_id
         }
         
         # Параметры в зависимости от типа
@@ -575,7 +917,8 @@ def admin_run_task():
                 hint=info.get('hint', ''),
                 points=100,
                 difficulty=Difficulty.EASY,
-                author_id=current_user.id
+                author_id=current_user.id,
+                category_id=task_data['category_id'] or None
             )
             db.session.add(new_challenge)
             db.session.flush()
@@ -644,7 +987,7 @@ def admin_run_task():
             flash(f"Ошибка при выполнении таска: {str(e)}", "error")
             return redirect(url_for('admin_run_task'))
     
-    return render_template('admin/run_task.html', generators=generators.keys())
+    return render_template('admin/run_task.html', generators=generators.keys(), categories=categories)
 
 
 @app.route('/admin/api/create-task', methods=['POST'])
@@ -830,22 +1173,28 @@ def pvp_join():
         # СОПЕРНИК НАЙДЕН! СОЗДАЕМ МАТЧ
         opponent = User.query.get(opponent_entry.user_id)
         
-        # Выбираем случайную задачу для дуэли
-        # (Желательно исключить задачи, которые они оба уже решили, но для старта возьмем любую случайную)
-        all_challenges = Challenge.query.filter_by(difficulty=Difficulty.EASY).all() # Для начала Easy
-        if not all_challenges:
+        # Выбираем случайные 3 задачи для дуэли
+        all_challenges = Challenge.query.filter_by(is_active=True).all()
+        if len(all_challenges) < PVP_TASKS_COUNT:
             flash("Нет доступных задач для PvP.", "error")
             return redirect(url_for('pvp_lobby'))
-            
-        duel_task = random.choice(all_challenges)
+        duel_tasks = random.sample(all_challenges, PVP_TASKS_COUNT)
         
         # Создаем матч
         new_match = Match(
             player1_id=current_user.id,
             player2_id=opponent.id,
-            challenge_id=duel_task.id
+            challenge_id=duel_tasks[0].id
         )
         db.session.add(new_match)
+        db.session.flush()
+
+        for idx, task in enumerate(duel_tasks):
+            db.session.add(MatchTask(
+                match_id=new_match.id,
+                challenge_id=task.id,
+                order_index=idx
+            ))
         
         # Удаляем соперника из очереди
         db.session.delete(opponent_entry)
@@ -899,61 +1248,77 @@ def pvp_arena(match_id):
         abort(403)
         
     # Если матч уже завершен
+    _finalize_match_if_expired(match)
     if not match.is_active:
-        return render_template('pvp_result.html', match=match)
+        match_tasks = _get_match_tasks(match)
+        total_points = sum(mt.challenge.points for mt in match_tasks if mt.challenge)
+        return render_template('pvp_result.html', match=match, total_points=total_points)
     
     opponent_id = match.player2_id if match.player1_id == current_user.id else match.player1_id
     opponent = User.query.get(opponent_id)
     
-    return render_template('pvp_arena.html', match=match, opponent=opponent, task=match.challenge)
+    match_tasks = _get_match_tasks(match)
+    state = _build_match_state(match)
+
+    opponent_id = opponent.id
+    my_stats = state['stats'].get(current_user.id, {'correct': 0, 'incorrect': 0})
+    opponent_stats = state['stats'].get(opponent_id, {'correct': 0, 'incorrect': 0})
+
+    return render_template(
+        'pvp_arena.html',
+        match=match,
+        opponent=opponent,
+        tasks=match_tasks,
+        task_states=state['task_states'],
+        my_stats=my_stats,
+        opponent_stats=opponent_stats,
+        time_left=_match_time_left_seconds(match),
+        match_duration=PVP_MATCH_DURATION_SECONDS
+    )
 
 @app.route('/pvp/submit_match', methods=['POST'])
 @login_required
 def pvp_submit():
-    match_id = request.form.get('match_id')
-    flag = request.form.get('flag')
-    
+    data = request.get_json(silent=True)
+    if not data:
+        data = request.form
+    if not data:
+        try:
+            raw = request.data.decode('utf-8') if request.data else ''
+            data = json.loads(raw) if raw else {}
+        except Exception:
+            data = {}
+
+    match_id = data.get('match_id')
+    challenge_id = data.get('challenge_id')
+    flag = (data.get('flag') or '').strip()
+
+    payload, status = _process_attempt(current_user, match_id, challenge_id, flag)
+    if payload.get('ok'):
+        socketio.emit('attempt_update', payload, room=_match_room(match_id), include_self=False)
+    return payload, status
+
+@app.route('/pvp/finish/<int:match_id>', methods=['POST'])
+@login_required
+def pvp_finish(match_id):
     match = Match.query.get_or_404(match_id)
-    
-    if not match.is_active:
-        flash("Матч уже завершен!", "error")
-        return redirect(url_for('pvp_arena', match_id=match.id))
-    
-    # Получаем индивидуальный флаг пользователя для задачи
-    user_flag_record = UserFlag.query.filter_by(user_id=current_user.id, challenge_id=match.challenge_id).first()
-    
-    # Если флага еще нет, создаем его
-    if not user_flag_record:
-        flag_value = TaskGenerator.generate_flag()
-        user_flag_record = UserFlag(user_id=current_user.id, challenge_id=match.challenge_id, flag=flag_value)
-        db.session.add(user_flag_record)
-        db.session.commit()
-    
-    if flag == user_flag_record.flag:
-        # ПОБЕДА!
-        match.is_active = False
-        match.winner_id = current_user.id
-        match.end_time = datetime.utcnow()
-        
-        # Расчет ELO
-        loser_id = match.player2_id if match.player1_id == current_user.id else match.player1_id
-        loser = User.query.get(loser_id)
-        
-        new_winner_elo, new_loser_elo = calculate_elo(current_user.elo_rating, loser.elo_rating)
-        
-        # Обновляем статы
-        current_user.elo_rating = new_winner_elo
-        current_user.user_points += (match.challenge.points + 50) # Бонус за победу
-        
-        loser.elo_rating = new_loser_elo
-        # Проигравшему утешительные баллы (опционально)
-        
-        db.session.commit()
-        return redirect(url_for('pvp_arena', match_id=match.id))
-    else:
-        flash("Неверный флаг!", "error")
-        return redirect(url_for('pvp_arena', match_id=match.id))
+    if current_user.id not in [match.player1_id, match.player2_id]:
+        return {'ok': False, 'message': 'Доступ запрещен.'}, 403
+
+    ended = _finalize_match_if_expired(match)
+    state = _build_match_state(match)
+    payload = {
+        'ok': True,
+        'match_over': not match.is_active,
+        'winner_id': match.winner_id,
+        'time_left': _match_time_left_seconds(match),
+        'stats': state['stats'],
+        'task_states': state['task_states']
+    }
+    if ended:
+        socketio.emit('attempt_update', payload, room=_match_room(match.id))
+    return payload, 200
 
 if __name__ == '__main__':
     # Запуск на всех интерфейсах (0.0.0.0) для Docker
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5001, allow_unsafe_werkzeug=True)

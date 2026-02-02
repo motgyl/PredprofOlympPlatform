@@ -10,14 +10,14 @@
     </div>
 
     {% for category in categories %}
-        {% if category.challenges %}
+        {% if category.tasks %}
         <div class="mb-5">
             <h3 class="text-accent fw-bold mb-3 border-bottom border-secondary pb-2">
                 {{ category.name }}
             </h3>
             
             <div class="row g-4">
-                {% for task in category.challenges %}
+                {% for task in category.tasks %}
                 <div class="col-md-4">
                     <!-- Карточка (Триггер модального окна) -->
                     <div class="ctf-card h-100 p-4 position-relative task-card cursor-pointer {{ 'solved-border' if task.id in solved_ids else '' }}"

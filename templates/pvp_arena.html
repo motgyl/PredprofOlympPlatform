@@ -24,45 +24,98 @@
     </div>
 
     <div class="row">
-        <!-- Описание задачи -->
+        <!-- Список задач -->
         <div class="col-lg-8">
-            <div class="ctf-card p-4 h-100">
-                <div class="d-flex justify-content-between mb-3">
-                    <span class="badge badge-ctf">{{ task.category.name }}</span>
-                    <span class="text-accent font-mono">{{ task.points }} pts</span>
-                </div>
-                <h3 class="text-white mb-3">{{ task.title }}</h3>
-                <div class="text-white-50 description-content">
-                    {{ task.description | safe }}
-                </div>
-                
-                {% if task.hint %}
-                <div class="mt-4 p-3 bg-dark rounded border border-secondary">
-                    <strong class="text-muted text-uppercase small">Подсказка:</strong>
-                    <p class="mb-0 text-white small">{{ task.hint }}</p>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Панель сдачи -->
-        <div class="col-lg-4">
-            <div class="ctf-card p-4 h-100 d-flex flex-column justify-content-center">
-                <h5 class="text-white text-center mb-4">Введи флаг первым!</h5>
-                
-                <form action="{{ url_for('pvp_submit') }}" method="POST">
-                    <input type="hidden" name="match_id" value="{{ match.id }}">
-                    
-                    <div class="mb-3">
-                        <input type="text" name="flag" class="form-control ctf-input text-center" placeholder="bobr{...}" autocomplete="off" autofocus>
+            {% for task in tasks %}
+                {% set challenge = task.challenge %}
+                {% set state = task_states.get(challenge.id, {}) %}
+                {% set solved_by = state.get('solved_by_user_id') %}
+                <div class="ctf-card p-4 mb-4 task-item" data-task-id="{{ challenge.id }}">
+                    <div class="d-flex justify-content-between mb-3">
+                        <span class="badge badge-ctf">{{ challenge.category.name if challenge.category else 'Без категории' }}</span>
+                        <span class="text-accent font-mono">{{ challenge.points }} pts</span>
+                    </div>
+                    <h4 class="text-white mb-2">{{ challenge.title }}</h4>
+                    <div class="text-white-50 description-content mb-3">
+                        {{ challenge.description | safe }}
                     </div>
                     
-                    <button type="submit" class="btn btn-ctf w-100 py-2">
-                        ОТПРАВИТЬ
-                    </button>
-                </form>
-                
-                <div class="text-center mt-3">
+                    {% if challenge.hint %}
+                    <div class="mb-3 p-3 bg-dark rounded border border-secondary">
+                        <strong class="text-muted text-uppercase small">Подсказка:</strong>
+                        <p class="mb-0 text-white small">{{ challenge.hint }}</p>
+                    </div>
+                    {% endif %}
+
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="badge task-status 
+                            {% if solved_by == current_user.id %}bg-success
+                            {% elif solved_by %}bg-danger
+                            {% else %}bg-secondary{% endif %}">
+                            {% if solved_by == current_user.id %}
+                                Решено вами
+                            {% elif solved_by %}
+                                Решено соперником
+                            {% else %}
+                                Не решено
+                            {% endif %}
+                        </span>
+                    </div>
+
+                    <form class="task-submit-form mt-3" data-task-id="{{ challenge.id }}" action="{{ url_for('pvp_submit') }}" method="POST">
+                        <input type="hidden" name="match_id" value="{{ match.id }}">
+                        <input type="hidden" name="challenge_id" value="{{ challenge.id }}">
+                        <div class="input-group">
+                            <span class="input-group-text ctf-input-group-text">🚩</span>
+                            <input type="text" name="flag" class="form-control ctf-input" placeholder="bobr{...}" autocomplete="off"
+                                   {% if solved_by %}disabled{% endif %}>
+                        </div>
+                        <button type="submit" class="btn btn-ctf w-100 py-2 mt-3" {% if solved_by %}disabled{% endif %}>
+                            ОТПРАВИТЬ
+                        </button>
+                    </form>
+                </div>
+            {% endfor %}
+        </div>
+
+        <!-- Панель статуса -->
+        <div class="col-lg-4">
+            <div class="ctf-card p-4 h-100">
+                <h5 class="text-white text-center mb-4">Статус боя</h5>
+
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between text-white-50">
+                        <span>Мои попытки</span>
+                        <span>
+                            <span id="my-correct" class="text-success fw-bold">{{ my_stats.correct }}</span> /
+                            <span id="my-incorrect" class="text-danger fw-bold">{{ my_stats.incorrect }}</span>
+                        </span>
+                    </div>
+                    <div class="d-flex justify-content-between text-white-50 mt-2">
+                        <span>Соперник</span>
+                        <span>
+                            <span id="op-correct" class="text-success fw-bold">{{ opponent_stats.correct }}</span> /
+                            <span id="op-incorrect" class="text-danger fw-bold">{{ opponent_stats.incorrect }}</span>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-muted small">Статус соперника:</span>
+                    <span id="opponent-status" class="badge bg-secondary ms-2">офлайн</span>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-muted small">Осталось времени:</span>
+                    <span id="match-timer" class="badge bg-secondary ms-2">--:--</span>
+                </div>
+
+                <div class="border-top border-secondary pt-3">
+                    <h6 class="text-white mb-2">Лента событий</h6>
+                    <div id="battleLog" class="small text-white-50" style="min-height: 120px;"></div>
+                </div>
+
+                <div class="text-center mt-4">
                     <div class="spinner-grow text-danger spinner-grow-sm" role="status"></div>
                     <span class="text-danger small ms-2 blink">Битва идет...</span>
                 </div>
@@ -71,19 +124,213 @@
     </div>
 </div>
 
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
-    // Автообновление страницы, если соперник выиграл
-    // (Простой вариант без вебсокетов: опрашиваем статус матча)
-    setInterval(function() {
-        fetch('/pvp/status') 
-            .then(r => r.json())
-            .then(data => {
-                // Если статус сменился на waiting (значит матч кончился и мы в меню) или что-то еще
-                // В данном простом примере, если матч кончится, нас перекинет на result при обновлении
-                // Просто перезагружаем страницу раз в 5 сек, чтобы увидеть результат
-                // window.location.reload(); 
-            });
-    }, 5000); 
-    // Лучше: сделать отдельный endpoint /api/match/<id>/status который возвращает winner_id
+const matchId = "{{ match.id }}";
+const myId = "{{ current_user.id }}";
+const opponentId = "{{ opponent.id }}";
+
+const socket = io({
+    transports: ['websocket', 'polling'],
+    withCredentials: true
+});
+const battleLog = document.getElementById('battleLog');
+const opponentStatus = document.getElementById('opponent-status');
+const timerEl = document.getElementById('match-timer');
+let timeLeft = parseInt("{{ time_left }}", 10);
+let timerHandle = null;
+
+function addLog(message, tone = 'text-white-50') {
+    const line = document.createElement('div');
+    line.className = tone;
+    line.textContent = message;
+    battleLog.prepend(line);
+}
+
+function formatTime(seconds) {
+    const min = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function setTimer(seconds) {
+    timeLeft = Math.max(0, seconds || 0);
+    if (timerEl) {
+        timerEl.textContent = formatTime(timeLeft);
+    }
+}
+
+function startTimer() {
+    if (timerHandle) {
+        clearInterval(timerHandle);
+    }
+    setTimer(timeLeft);
+    timerHandle = setInterval(async () => {
+        timeLeft = Math.max(0, timeLeft - 1);
+        setTimer(timeLeft);
+        if (timeLeft <= 0) {
+            clearInterval(timerHandle);
+            await finishMatchByTime();
+        }
+    }, 1000);
+}
+
+async function finishMatchByTime() {
+    const response = await fetch("{{ url_for('pvp_finish', match_id=match.id) }}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin'
+    });
+    let result = null;
+    try {
+        result = await response.json();
+    } catch (e) {
+        addLog('Не удалось завершить матч по таймеру', 'text-danger');
+        return;
+    }
+    handleAttemptUpdate(result, false);
+}
+
+function updateStats(stats) {
+    if (!stats) return;
+    const my = stats[myId] || {correct: 0, incorrect: 0};
+    const op = stats[opponentId] || {correct: 0, incorrect: 0};
+    document.getElementById('my-correct').textContent = my.correct;
+    document.getElementById('my-incorrect').textContent = my.incorrect;
+    document.getElementById('op-correct').textContent = op.correct;
+    document.getElementById('op-incorrect').textContent = op.incorrect;
+}
+
+function updateTaskStates(taskStates) {
+    if (!taskStates) return;
+    document.querySelectorAll('.task-item').forEach((item) => {
+        const taskId = item.dataset.taskId;
+        const state = taskStates[taskId];
+        if (!state) return;
+        const statusBadge = item.querySelector('.task-status');
+        const input = item.querySelector('input[name="flag"]');
+        const button = item.querySelector('button[type="submit"]');
+        if (!state.solved_by_user_id) return;
+        const solvedByMe = state.solved_by_user_id === myId;
+        statusBadge.classList.remove('bg-secondary', 'bg-danger', 'bg-success');
+        statusBadge.classList.add(solvedByMe ? 'bg-success' : 'bg-danger');
+        statusBadge.textContent = solvedByMe ? 'Решено вами' : 'Решено соперником';
+        if (input) input.disabled = true;
+        if (button) button.disabled = true;
+    });
+}
+
+function handleAttemptUpdate(payload, isLocal = false) {
+    if (!payload) return;
+    updateStats(payload.stats);
+    updateTaskStates(payload.task_states);
+    if (typeof payload.time_left === 'number') {
+        setTimer(payload.time_left);
+    }
+
+    if (payload.user_id === opponentId) {
+        if (payload.is_correct) {
+            addLog('Соперник решил задачу ✅', 'text-success');
+        } else {
+            addLog('Соперник ошибся ❌', 'text-danger');
+        }
+    } else if (isLocal) {
+        if (payload.is_correct === true) {
+            addLog('Правильный флаг ✅', 'text-success');
+        } else if (payload.is_correct === false) {
+            addLog('Неверный флаг ❌', 'text-danger');
+        }
+    }
+
+    if (payload.match_over) {
+        window.location.href = "{{ url_for('pvp_arena', match_id=match.id) }}";
+    }
+}
+
+socket.on('connect', () => {
+    socket.emit('join_match', {match_id: matchId});
+});
+
+socket.on('connect_error', () => {
+    addLog('Ошибка соединения с сервером', 'text-danger');
+});
+
+socket.on('join_error', (data) => {
+    addLog('Ошибка входа в матч: ' + (data.message || 'unknown'), 'text-danger');
+});
+
+socket.on('state', (payload) => {
+    handleAttemptUpdate(payload, false);
+    if (typeof payload.time_left === 'number') {
+        timeLeft = payload.time_left;
+        startTimer();
+    }
+});
+
+socket.on('opponent_status', (data) => {
+    if (data.user_id !== opponentId) return;
+    if (data.status === 'connected') {
+        opponentStatus.className = 'badge bg-success ms-2';
+        opponentStatus.textContent = 'в сети';
+        addLog('Соперник подключился', 'text-success');
+    } else {
+        opponentStatus.className = 'badge bg-secondary ms-2';
+        opponentStatus.textContent = 'офлайн';
+        addLog('Соперник отключился', 'text-warning');
+    }
+});
+
+socket.on('attempt_update', (payload) => handleAttemptUpdate(payload, false));
+socket.on('attempt_result', (payload) => {
+    if (!payload.ok) {
+        addLog(payload.message || 'Ошибка отправки', 'text-danger');
+        return;
+    }
+    handleAttemptUpdate(payload, true);
+});
+
+window.addEventListener('beforeunload', () => {
+    socket.emit('leave_match', {match_id: matchId});
+});
+
+document.querySelectorAll('.task-submit-form').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const payload = {
+            match_id: formData.get('match_id'),
+            challenge_id: formData.get('challenge_id'),
+            flag: formData.get('flag')
+        };
+
+        if (socket.connected) {
+            socket.emit('submit_flag', payload);
+            form.reset();
+            return;
+        }
+
+        const response = await fetch("{{ url_for('pvp_submit') }}", {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+            credentials: 'same-origin'
+        });
+
+        let result = null;
+        try {
+            result = await response.json();
+        } catch (e) {
+            addLog('Сервер вернул некорректный ответ', 'text-danger');
+            return;
+        }
+        if (!result.ok) {
+            addLog(result.message || 'Ошибка отправки', 'text-danger');
+            return;
+        }
+
+        handleAttemptUpdate(result, true);
+        form.reset();
+    });
+});
 </script>
 {% endblock %}

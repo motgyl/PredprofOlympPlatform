@@ -13,15 +13,19 @@
                     <p class="lead text-white">Вы уничтожили соперника.</p>
                     <div class="mt-4">
                         <span class="badge bg-success fs-5">+ ELO</span>
-                        <span class="badge bg-success fs-5">+ {{ match.challenge.points }} pts</span>
+                        <span class="badge bg-success fs-5">+ {{ total_points }} pts</span>
                     </div>
-                {% else %}
+                {% elif match.winner_id %}
                     <h1 class="display-1 mb-4">💀</h1>
                     <h2 class="text-danger fw-bold mb-3">ПОРАЖЕНИЕ</h2>
                     <p class="lead text-white">В следующий раз повезет.</p>
                     <div class="mt-4">
                         <span class="badge bg-danger fs-5">- ELO</span>
                     </div>
+                {% else %}
+                    <h1 class="display-1 mb-4">🤝</h1>
+                    <h2 class="text-accent fw-bold mb-3">НИЧЬЯ</h2>
+                    <p class="lead text-white">Время вышло, силы равны.</p>
                 {% endif %}
 
                 <hr class="hero-divider my-5">

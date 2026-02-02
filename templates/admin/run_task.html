@@ -37,6 +37,16 @@
                     </div>
 
                     <div class="mb-3">
+                        <label class="form-label text-muted">Категория</label>
+                        <select name="category_id" class="form-control ctf-input">
+                            <option value="">Без категории</option>
+                            {% for category in categories %}
+                                <option value="{{ category.id }}">{{ category.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
                         <label class="form-label text-muted">Флаг</label>
                         <input type="text" name="flag" class="form-control ctf-input" placeholder="bobr{test_flag}" required>
                     </div>
