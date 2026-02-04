@@ -51,7 +51,7 @@ def init_app_data():
             db.create_all()
             
             # 2. Создаем базовые категории
-            cats = ['Cryptography', 'Web', 'Logic', 'Reverse', 'Forensics']
+            cats = ['Cryptography', 'Web', 'Logic', 'Reverse', 'Forensics', 'Багодельня']
             for c_name in cats:
                 if not Category.query.filter_by(name=c_name).first():
                     db.session.add(Category(name=c_name))
@@ -305,6 +305,10 @@ def admin_generate():
 
     gen_count = 0
     for _ in range(count):
+        # Проверка для категории "Багодельня"
+        if category_name == 'Багодельня':
+            flash("Для категории 'Багодельня' автогенерация отключена. Используйте ручное добавление.", "error")
+            return redirect(url_for('admin_dashboard'))
         # Используем новый генератор
         task_data = TaskGenerator.generate_task(category_name, difficulty)
         
