@@ -138,30 +138,32 @@ class TaskGenerator:
 
         # 5. Логика формирования флага
         
-        # СЛУЧАЙ 1: Статический флаг (Linux, Network, Forensics)
-        # В JSON это поле "static_flag"
-        if 'static_flag' in template:
-            final_flag = template['static_flag']
-            final_desc = template['desc_template']
-        
-        # СЛУЧАЙ 2: Динамический крипто-флаг
-        # В JSON это поле "encode_method"
-        else:
-            # Генерируем уникальный флаг bobr{...}
+        # Для Cryptography всегда: сначала генерируем флаг, потом кодируем
+        if category == 'Cryptography':
             final_flag = TaskGenerator.generate_flag()
-            
-            # Кодируем его
             method = template.get('encode_method', 'base64')
             key = template.get('key', None)
             encoded_str = TaskGenerator.encode_string(final_flag, method, key)
-            
-            # Вставляем в описание
-            # В JSON должно быть написано: "Текст... <code>{encoded_flag}</code> ..."
             try:
                 final_desc = template['desc_template'].format(encoded_flag=encoded_str)
             except KeyError:
-                # Если в шаблоне забыли {encoded_flag}, просто добавляем в конец
                 final_desc = template['desc_template'] + f"<br><br>Data: <code>{encoded_str}</code>"
+        else:
+            # СТАТИЧЕСКИЙ флаг (Linux, Network, Forensics)
+            # В JSON это поле "static_flag"
+            if 'static_flag' in template:
+                final_flag = template['static_flag']
+                final_desc = template['desc_template']
+            else:
+                # Фолбэк: на всякий случай делаем динамический флаг
+                final_flag = TaskGenerator.generate_flag()
+                method = template.get('encode_method', 'base64')
+                key = template.get('key', None)
+                encoded_str = TaskGenerator.encode_string(final_flag, method, key)
+                try:
+                    final_desc = template['desc_template'].format(encoded_flag=encoded_str)
+                except KeyError:
+                    final_desc = template['desc_template'] + f"<br><br>Data: <code>{encoded_str}</code>"
 
         # 6. Возвращаем готовый объект
         return {

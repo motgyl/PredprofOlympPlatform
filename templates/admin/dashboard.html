@@ -48,6 +48,11 @@
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
+                        <button class="nav-link text-accent" id="json-gen-tab" data-bs-toggle="tab" data-bs-target="#json-gen" type="button" role="tab">
+                            JSON генератор
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
                         <button class="nav-link text-accent" id="autogen-tab" data-bs-toggle="tab" data-bs-target="#autogen" type="button" role="tab">
                             Автогенерация
                         </button>
@@ -109,6 +114,38 @@
                                 <input type="text" name="hint" class="form-control ctf-input">
                             </div>
                             <button type="submit" class="btn btn-ctf w-100">Создать задание</button>
+                        </form>
+                    </div>
+
+                    <!-- JSON ГЕНЕРАЦИЯ (старые шаблоны) -->
+                    <div class="tab-pane fade" id="json-gen" role="tabpanel">
+                        <form action="{{ url_for('admin_generate') }}" method="POST">
+                            <div class="mb-3">
+                                <label class="form-label text-muted">Категория</label>
+                                <select name="category" class="form-control ctf-input">
+                                    {% for cat in generator_categories %}
+                                        <option value="{{ cat }}">{{ cat }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% if not generator_categories %}
+                                    <div class="text-muted small mt-2">Шаблоны не найдены (challenges_templates.json отсутствует).</div>
+                                {% endif %}
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-muted">Сложность</label>
+                                <select name="difficulty" class="form-control ctf-input">
+                                    <option value="Easy">Easy</option>
+                                    <option value="Medium">Medium</option>
+                                    <option value="Hard">Hard</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label class="form-label text-muted">Количество</label>
+                                <input type="number" name="count" class="form-control ctf-input" value="1" min="1" max="10">
+                            </div>
+                            <button type="submit" class="btn btn-ctf w-100" {% if not generator_categories %}disabled{% endif %}>
+                                Сгенерировать
+                            </button>
                         </form>
                     </div>
 

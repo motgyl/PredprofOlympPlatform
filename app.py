@@ -109,6 +109,13 @@ def _incorrect_count(match_id, user_id):
 def _are_all_tasks_solved(match_tasks):
     return all(mt.solved_by_user_id for mt in match_tasks) if match_tasks else False
 
+def _resolve_flag_for_challenge(challenge):
+    flags = db.session.query(UserFlag.flag).filter_by(challenge_id=challenge.id).distinct().all()
+    flags = [row[0] for row in flags]
+    if len(flags) == 1:
+        return flags[0]
+    return TaskGenerator.generate_flag()
+
 def _apply_match_result(match, winner_id=None):
     match.is_active = False
     match.winner_id = winner_id
@@ -299,7 +306,7 @@ def init_app_data():
                 db.session.rollback()
             
             # 2. Создаем базовые категории
-            cats = ['Cryptography', 'Web', 'Logic', 'Reverse', 'Forensics']
+            cats = ['Cryptography', 'Web', 'Logic', 'Reverse', 'Forensics', 'Linux', 'Network']
             for c_name in cats:
                 if not Category.query.filter_by(name=c_name).first():
                     db.session.add(Category(name=c_name))
@@ -515,17 +522,19 @@ def register():
 
                 # Если категория Forensics — создаём стегано-изображение и файл
                 cat_name = (challenge.category.name.lower() if challenge.category else '')
-                flag_value = TaskGenerator.generate_flag()
+                flag_value = _resolve_flag_for_challenge(challenge)
 
                 if cat_name == 'forensics':
-                    user_dir = os.path.join(app.root_path, 'static', 'uploads', challenge.id, new_user.id)
+                    public_dir = challenge.public_files_path or os.path.join('static', 'uploads', challenge.id)
+                    user_dir = os.path.join(app.root_path, public_dir, new_user.id)
+                    os.makedirs(user_dir, exist_ok=True)
                     steg = SimpleStegano(image_path=base_image)
                     steg.generate(flag=flag_value, save_path=user_dir)
 
                     user_file = UserFile(
                         user_id=new_user.id,
                         challenge_id=challenge.id,
-                        file_path=os.path.join('static', 'uploads', challenge.id, new_user.id, 'stegano_image.png'),
+                        file_path=os.path.join(public_dir, new_user.id, 'stegano_image.png'),
                         file_name='stegano_image.png'
                     )
                     db.session.add(user_file)
@@ -761,8 +770,8 @@ def submit_flag():
     
     # Если флага еще нет, создаем его (на случай, если он не был сгенерирован ранее)
     if not user_flag_record:
-        # Генерируем новый флаг
-        flag_value = TaskGenerator.generate_flag()
+        # Генерируем флаг в соответствии с уже существующими правилами задачи
+        flag_value = _resolve_flag_for_challenge(challenge)
         user_flag_record = UserFlag(user_id=current_user.id, challenge_id=challenge.id, flag=flag_value)
         db.session.add(user_flag_record)
         db.session.commit()
@@ -801,6 +810,9 @@ def admin_dashboard():
     # Передаем категории в шаблон
     categories = Category.query.all()
     topics = Topic.query.order_by(Topic.name).all()
+    if not TaskGenerator.TEMPLATES:
+        TaskGenerator.load_templates()
+    generator_categories = sorted(TaskGenerator.TEMPLATES.keys())
     # Непубликованные задачи (для админа) - те, которые не активны
     unpublished = Challenge.query.filter_by(is_active=False).order_by(Challenge.id.desc()).all()
     return render_template('admin/dashboard.html', 
@@ -809,6 +821,7 @@ def admin_dashboard():
                            solves_count=solves_count,
                            categories=categories,
                            topics=topics,
+                           generator_categories=generator_categories,
                            unpublished=unpublished)
 
 
@@ -851,8 +864,50 @@ def admin_publish_challenge(challenge_id):
     flash(f"Задача '{ch.title}' опубликована. Сгенерировано флагов: {created}", 'success')
     return redirect(url_for('admin_dashboard'))
 
-# 1. АВТО ГЕНЕРАЦИЯ
-# old admin auto-generation removed; manual creation and autotask-based generation remain
+# 1. АВТО ГЕНЕРАЦИЯ (шаблоны из JSON)
+@app.route('/admin/generate', methods=['POST'])
+@admin_required
+def admin_generate():
+    count = int(request.form.get('count', 1))
+    category_name = request.form.get('category')
+    difficulty = request.form.get('difficulty')
+
+    category = Category.query.filter_by(name=category_name).first()
+    if not category:
+        flash(f"Категория {category_name} не найдена (нужно создать в БД)", "error")
+        return redirect(url_for('admin_dashboard'))
+
+    gen_count = 0
+    all_users = User.query.filter_by(is_admin=False).all()
+
+    for _ in range(count):
+        task_data = TaskGenerator.generate_task(category_name, difficulty)
+
+        new_chall = Challenge(
+            title=task_data['title'],
+            description=task_data['description'],
+            hint=task_data.get('hint', ''),
+            points=task_data['points'],
+            difficulty=Difficulty(difficulty),
+            category_id=category.id,
+            author_id=current_user.id
+        )
+        db.session.add(new_chall)
+        db.session.flush()
+
+        for user in all_users:
+            user_flag = UserFlag(
+                user_id=user.id,
+                challenge_id=new_chall.id,
+                flag=task_data['flag']
+            )
+            db.session.add(user_flag)
+
+        gen_count += 1
+
+    db.session.commit()
+    flash(f"Сгенерировано {gen_count} задач ({category_name})", "success")
+    return redirect(url_for('admin_dashboard'))
 
 # 2. РУЧНОЕ ДОБАВЛЕНИЕ (НОВОЕ)
 @app.route('/admin/create', methods=['POST'])
@@ -1605,3 +1660,4 @@ def pvp_finish(match_id):
 if __name__ == '__main__':
     # Запуск на всех интерфейсах (0.0.0.0) для Docker
     socketio.run(app, debug=True, host='0.0.0.0', port=5001, allow_unsafe_werkzeug=True)
+    
